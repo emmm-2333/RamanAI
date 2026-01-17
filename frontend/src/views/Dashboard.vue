@@ -1,286 +1,421 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { useAuthStore } from '../stores/auth'
-import { useRouter } from 'vue-router'
-import ThemeToggle from '../components/ThemeToggle.vue'
-import * as echarts from 'echarts'
-import { useDark } from '@vueuse/core'
-import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted, onUnmounted, watch } from "vue";
+import { useAuthStore } from "../stores/auth";
+import { useRouter } from "vue-router";
+import ThemeToggle from "../components/ThemeToggle.vue";
+import * as echarts from "echarts";
+import { useDark } from "@vueuse/core";
+import axios from "axios";
+import { ElMessage } from "element-plus";
+import {
+  Upload,
+  User,
+  SwitchButton,
+  Monitor,
+  FirstAidKit,
+  Loading,
+} from "@element-plus/icons-vue";
 
-const authStore = useAuthStore()
-const router = useRouter()
-const isDark = useDark()
+const authStore = useAuthStore();
+const router = useRouter();
+const isDark = useDark();
 
-const chartContainer = ref(null)
-let myChart = null
+const chartContainer = ref(null);
+let myChart = null;
 
 // 上传相关
-const fileList = ref([])
-const patientId = ref('')
-const isUploading = ref(false)
+const fileList = ref([]);
+const patientId = ref("");
+const isUploading = ref(false);
 
 // 诊断结果
-const diagnosisResult = ref(null)
+const diagnosisResult = ref(null);
 
 const handleLogout = () => {
-  authStore.logout()
-  router.push('/login')
-}
+  authStore.logout();
+  router.push("/login");
+};
 
 // 初始化图表
 const initChart = () => {
-  if (!chartContainer.value) return
-  
+  if (!chartContainer.value) return;
+
   // 根据当前主题初始化
-  myChart = echarts.init(chartContainer.value, isDark.value ? 'dark' : undefined)
-  
+  myChart = echarts.init(
+    chartContainer.value,
+    isDark.value ? "dark" : undefined,
+  );
+
   const option = {
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
     title: {
-      text: '拉曼光谱分析',
-      left: 'center'
+      text: "拉曼光谱分析趋势图",
+      left: "20px",
+      top: "20px",
+      textStyle: {
+        fontSize: 18,
+        fontWeight: "normal",
+        color: isDark.value ? "#ccc" : "#333",
+      },
     },
     tooltip: {
-      trigger: 'axis'
+      trigger: "axis",
+      backgroundColor: "rgba(255, 255, 255, 0.9)",
+      borderColor: "#ccc",
+      textStyle: {
+        color: "#333",
+      },
     },
     grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      containLabel: true
+      left: "3%",
+      right: "4%",
+      bottom: "3%",
+      top: "80px",
+      containLabel: true,
     },
     toolbox: {
       feature: {
-        saveAsImage: {}
-      }
+        saveAsImage: { title: "保存图片" },
+        dataZoom: { title: { zoom: "区域缩放", back: "还原" } },
+        restore: { title: "重置" },
+      },
+      top: "20px",
+      right: "20px",
     },
     xAxis: {
-      type: 'category',
+      type: "category",
+      name: "Wavenumber (cm⁻¹)",
+      nameLocation: "middle",
+      nameGap: 30,
       boundaryGap: false,
-      data: Array.from({length: 100}, (_, i) => i + 400) // 模拟波长 400-500
+      data: Array.from({ length: 100 }, (_, i) => i + 400),
+      axisLine: { lineStyle: { color: isDark.value ? "#666" : "#999" } },
     },
     yAxis: {
-      type: 'value',
-      name: 'Intensity'
+      type: "value",
+      name: "Intensity (a.u.)",
+      axisLine: {
+        show: true,
+        lineStyle: { color: isDark.value ? "#666" : "#999" },
+      },
+      splitLine: {
+        lineStyle: { type: "dashed", color: isDark.value ? "#444" : "#eee" },
+      },
     },
     series: [
       {
-        name: '原始光谱',
-        type: 'line',
-        data: Array.from({length: 100}, () => Math.random() * 1000), // 初始随机数据
-        smooth: true
-      }
-    ],
-    dataZoom: [
-      {
-        type: 'inside',
-        xAxisIndex: 0,
-        filterMode: 'filter'
+        name: "原始光谱",
+        type: "line",
+        data: Array.from({ length: 100 }, () => Math.random() * 1000),
+        smooth: true,
+        showSymbol: false,
+        itemStyle: { color: "#0072C6" },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: "rgba(0, 114, 198, 0.3)" },
+            { offset: 1, color: "rgba(0, 114, 198, 0.05)" },
+          ]),
+        },
       },
-      {
-        type: 'slider',
-        xAxisIndex: 0,
-        filterMode: 'filter'
-      }
-    ]
-  }
-  
-  myChart.setOption(option)
-}
+    ],
+    dataZoom: [{ type: "inside" }, { type: "slider" }],
+  };
+
+  myChart.setOption(option);
+};
 
 // 监听主题变化更新图表
 watch(isDark, () => {
   if (myChart) {
-    myChart.dispose()
-    initChart()
+    myChart.dispose();
+    initChart();
   }
-})
+});
 
 onMounted(() => {
-  initChart()
-  window.addEventListener('resize', () => myChart?.resize())
-})
+  initChart();
+  window.addEventListener("resize", () => myChart?.resize());
+});
 
 onUnmounted(() => {
-  window.removeEventListener('resize', () => myChart?.resize())
-  myChart?.dispose()
-})
+  window.removeEventListener("resize", () => myChart?.resize());
+  myChart?.dispose();
+});
 
 // 处理文件上传
 const handleUpload = async (file) => {
-  isUploading.value = true
-  const formData = new FormData()
-  formData.append('file', file.raw)
+  isUploading.value = true;
+  const formData = new FormData();
+  formData.append("file", file.raw);
   if (patientId.value) {
-    formData.append('patient_id', patientId.value)
+    formData.append("patient_id", patientId.value);
   }
-  
+
   try {
-    const token = localStorage.getItem('access_token')
-    const response = await axios.post('http://127.0.0.1:8000/api/v1/upload/', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    
-    diagnosisResult.value = response.data
-    ElMessage.success('诊断完成')
-    
-    // TODO: 使用返回的实际数据更新图表
-    // 这里仅模拟更新
-    updateChartWithResult(response.data)
-    
+    const token = localStorage.getItem("access_token");
+    const response = await axios.post(
+      "http://127.0.0.1:8000/api/v1/upload/",
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    diagnosisResult.value = response.data;
+    ElMessage.success("诊断完成");
+    updateChartWithResult(response.data);
   } catch (error) {
-    ElMessage.error('上传失败')
-    console.error(error)
+    ElMessage.error("上传失败");
+    console.error(error);
   } finally {
-    isUploading.value = false
-    // 清除文件列表，允许再次上传
-    fileList.value = []
+    isUploading.value = false;
+    fileList.value = [];
   }
-}
+};
 
 const updateChartWithResult = (result) => {
-  if (!myChart) return
-  // 模拟根据诊断结果生成新的曲线
-  const newData = Array.from({length: 100}, () => Math.random() * 1000 + (result.diagnosis_result === 'Malignant' ? 500 : 0))
-  
+  if (!myChart) return;
+  const isMalignant = result.diagnosis_result === "Malignant";
+  const color = isMalignant ? "#FF0000" : "#28a745";
+
+  // 模拟数据更新
+  const newData = Array.from(
+    { length: 100 },
+    () => Math.random() * 1000 + (isMalignant ? 500 : 0),
+  );
+
   myChart.setOption({
     title: {
-      text: `诊断结果: ${result.diagnosis_result} (置信度: ${result.confidence_score})`,
-      textStyle: {
-        color: result.diagnosis_result === 'Malignant' ? '#F56C6C' : '#67C23A'
-      }
+      text: `诊断结果: ${result.diagnosis_result} (置信度: ${(result.confidence_score * 100).toFixed(2)}%)`,
+      textStyle: { color: color, fontWeight: "bold" },
     },
-    series: [{
-      data: newData
-    }]
-  })
-}
+    series: [
+      {
+        data: newData,
+        itemStyle: { color: color },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            {
+              offset: 0,
+              color: isMalignant
+                ? "rgba(255, 0, 0, 0.3)"
+                : "rgba(40, 167, 69, 0.3)",
+            },
+            {
+              offset: 1,
+              color: isMalignant
+                ? "rgba(255, 0, 0, 0.05)"
+                : "rgba(40, 167, 69, 0.05)",
+            },
+          ]),
+        },
+      },
+    ],
+  });
+};
 </script>
 
 <template>
-  <el-container class="layout-container">
-    <el-header class="header">
-      <div class="logo">
-        RamanAI
+  <el-container
+    class="h-screen flex flex-col bg-medical-bg dark:bg-gray-900 transition-colors duration-300"
+  >
+    <!-- Header -->
+    <el-header
+      class="!h-16 flex justify-between items-center px-6 bg-medical-primary text-white shadow-md z-10 dark:bg-gray-800 dark:border-b dark:border-gray-700"
+    >
+      <div class="flex items-center gap-3">
+        <el-icon class="text-white" :size="28"><FirstAidKit /></el-icon>
+        <span class="text-xl font-semibold tracking-wide"
+          >RamanAI 医疗平台</span
+        >
       </div>
-      <div class="user-info">
-        <span class="username" v-if="authStore.user">
-          欢迎, {{ authStore.user.username }} ({{ authStore.user.role }})
-        </span>
-        <ThemeToggle />
-        <el-button type="danger" link @click="handleLogout" style="margin-left: 15px;">退出</el-button>
+      <div class="flex items-center gap-6">
+        <div
+          class="flex items-center gap-3 bg-white/10 px-4 py-1.5 rounded-full backdrop-blur-sm"
+          v-if="authStore.user"
+        >
+          <el-avatar :size="32" :icon="User" class="bg-white/20 text-white" />
+          <span class="text-sm font-medium">{{ authStore.user.username }}</span>
+          <span class="text-xs bg-white/20 px-2 py-0.5 rounded-full">{{
+            authStore.user.role
+          }}</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <ThemeToggle />
+          <el-popconfirm
+            title="确定要退出登录吗？"
+            confirm-button-text="退出"
+            cancel-button-text="取消"
+            confirm-button-type="danger"
+            @confirm="handleLogout"
+          >
+            <template #reference>
+              <el-button
+                type="danger"
+                circle
+                plain
+                class="!border-none !bg-white/10 hover:!bg-white/20 !text-white"
+              >
+                <el-icon><SwitchButton /></el-icon>
+              </el-button>
+            </template>
+          </el-popconfirm>
+        </div>
       </div>
     </el-header>
-    
-    <el-container>
-      <el-aside width="300px" class="aside">
-        <el-card class="control-panel">
-          <template #header>
-            <div class="card-header">
-              <span>操作面板</span>
-            </div>
-          </template>
-          
+
+    <el-container class="flex-1 overflow-hidden">
+      <!-- Sidebar -->
+      <el-aside
+        width="320px"
+        class="p-6 overflow-y-auto border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+      >
+        <!-- 病患信息卡片 -->
+        <div class="mb-6">
+          <div
+            class="flex items-center gap-2 mb-4 pb-2 border-b border-gray-100 dark:border-gray-700"
+          >
+            <el-icon class="text-medical-primary"><User /></el-icon>
+            <span class="font-semibold text-gray-800 dark:text-gray-200"
+              >患者信息</span
+            >
+          </div>
           <el-form label-position="top">
-            <el-form-item label="病人 ID (可选)">
-              <el-input v-model="patientId" placeholder="请输入病人ID" />
-            </el-form-item>
-            
-            <el-form-item label="上传光谱文件 (.txt/.csv)">
-              <el-upload
-                class="upload-demo"
-                action="#"
-                :auto-upload="false"
-                :on-change="handleUpload"
-                :file-list="fileList"
-                :limit="1"
-                :show-file-list="false"
-              >
-                <el-button type="primary" :loading="isUploading">选择文件并诊断</el-button>
-              </el-upload>
+            <el-form-item label="患者 ID / 编号" class="!mb-0">
+              <el-input
+                v-model="patientId"
+                placeholder="输入 ID (如: P-2026001)"
+                size="large"
+                :prefix-icon="Monitor"
+                class="!w-full"
+              />
             </el-form-item>
           </el-form>
-          
-          <div v-if="diagnosisResult" class="result-box" :class="diagnosisResult.diagnosis_result">
-            <h3>诊断结果</h3>
-            <p><strong>类型:</strong> {{ diagnosisResult.diagnosis_result }}</p>
-            <p><strong>置信度:</strong> {{ diagnosisResult.confidence_score }}</p>
+        </div>
+
+        <!-- 操作卡片 -->
+        <div class="mb-6">
+          <div
+            class="flex items-center gap-2 mb-4 pb-2 border-b border-gray-100 dark:border-gray-700"
+          >
+            <el-icon class="text-medical-primary"><Upload /></el-icon>
+            <span class="font-semibold text-gray-800 dark:text-gray-200"
+              >光谱数据录入</span
+            >
           </div>
-        </el-card>
+          <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-1">
+            <el-upload
+              class="w-full"
+              drag
+              action="#"
+              :auto-upload="false"
+              :on-change="handleUpload"
+              :file-list="fileList"
+              :limit="1"
+              :show-file-list="false"
+            >
+              <el-icon class="el-icon--upload !text-medical-primary"
+                ><upload-filled
+              /></el-icon>
+              <div class="el-upload__text dark:text-gray-300">
+                拖拽文件至此 或 <em class="text-medical-primary">点击上传</em>
+              </div>
+              <template #tip>
+                <div class="el-upload__tip text-center dark:text-gray-400">
+                  支持 .txt / .csv 格式，最大 10MB
+                </div>
+              </template>
+            </el-upload>
+
+            <div
+              v-if="isUploading"
+              class="text-center py-3 text-medical-primary flex items-center justify-center gap-2"
+            >
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span class="text-sm font-medium">正在分析数据...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 诊断结果卡片 -->
+        <transition name="el-fade-in">
+          <div
+            v-if="diagnosisResult"
+            class="rounded-lg border-l-4 p-4 shadow-sm transition-all duration-300 bg-white dark:bg-gray-700/50"
+            :class="
+              diagnosisResult.diagnosis_result === 'Malignant'
+                ? 'border-medical-danger bg-red-50 dark:bg-red-900/10'
+                : 'border-medical-success bg-green-50 dark:bg-green-900/10'
+            "
+          >
+            <div class="flex justify-between items-center mb-4">
+              <span class="font-bold text-gray-800 dark:text-gray-100"
+                >智能诊断报告</span
+              >
+              <el-tag
+                :type="
+                  diagnosisResult.diagnosis_result === 'Malignant'
+                    ? 'danger'
+                    : 'success'
+                "
+                effect="dark"
+                round
+              >
+                {{
+                  diagnosisResult.diagnosis_result === "Malignant"
+                    ? "高风险"
+                    : "低风险"
+                }}
+              </el-tag>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label
+                  class="block text-xs text-gray-500 dark:text-gray-400 mb-1"
+                  >诊断类型</label
+                >
+                <span
+                  class="text-lg font-medium text-gray-800 dark:text-gray-200"
+                  >{{ diagnosisResult.diagnosis_result }}</span
+                >
+              </div>
+              <div>
+                <label
+                  class="block text-xs text-gray-500 dark:text-gray-400 mb-1"
+                  >AI 置信度</label
+                >
+                <span
+                  class="text-lg font-medium text-gray-800 dark:text-gray-200"
+                  >{{
+                    (diagnosisResult.confidence_score * 100).toFixed(2)
+                  }}%</span
+                >
+              </div>
+            </div>
+            <div v-if="diagnosisResult.diagnosis_result === 'Malignant'">
+              <el-alert
+                title="检测到异常，建议立即复核"
+                type="error"
+                show-icon
+                :closable="false"
+                class="!bg-white/80 dark:!bg-gray-800/80"
+              />
+            </div>
+          </div>
+        </transition>
       </el-aside>
-      
-      <el-main class="main">
-        <div ref="chartContainer" class="chart-container"></div>
+
+      <!-- Main Content -->
+      <el-main class="!p-6 bg-gray-50 dark:bg-gray-900">
+        <div
+          class="h-full bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-1 flex flex-col"
+        >
+          <div ref="chartContainer" class="flex-1 w-full min-h-[500px]"></div>
+        </div>
       </el-main>
     </el-container>
   </el-container>
 </template>
-
-<style scoped>
-.layout-container {
-  height: 100vh;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--el-border-color);
-  padding: 0 20px;
-}
-
-.logo {
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: var(--el-color-primary);
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-}
-
-.username {
-  margin-right: 15px;
-  font-size: 0.9rem;
-}
-
-.aside {
-  border-right: 1px solid var(--el-border-color);
-  padding: 20px;
-}
-
-.main {
-  padding: 20px;
-  background-color: var(--el-bg-color-page);
-}
-
-.chart-container {
-  width: 100%;
-  height: 100%;
-  min-height: 500px;
-  background-color: var(--el-bg-color);
-  border-radius: 4px;
-}
-
-.result-box {
-  margin-top: 20px;
-  padding: 15px;
-  border-radius: 4px;
-  background-color: var(--el-fill-color-light);
-}
-
-.result-box.Malignant {
-  border-left: 5px solid #F56C6C;
-  background-color: rgba(245, 108, 108, 0.1);
-}
-
-.result-box.Benign {
-  border-left: 5px solid #67C23A;
-  background-color: rgba(103, 194, 58, 0.1);
-}
-</style>
