@@ -61,3 +61,6 @@ build/
 # Misc
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Project documentation (internal)
+.trae/
