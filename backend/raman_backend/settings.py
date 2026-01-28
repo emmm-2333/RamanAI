@@ -18,8 +18,10 @@ import os
 
 # 初始化环境变量管理器
 env = environ.Env()
-# 读取 .env 配置文件
-environ.Env.read_env(os.path.join(Path(__file__).resolve().parent.parent, '.env'))
+# 读取 .env 配置文件（若不存在则忽略）
+env_file = os.path.join(Path(__file__).resolve().parent.parent, '.env')
+if os.path.exists(env_file):
+    environ.Env.read_env(env_file)
 
 # 构建项目内部路径，例如：BASE_DIR / 'subdir'
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -88,16 +90,31 @@ WSGI_APPLICATION = "raman_backend.wsgi.application"
 # 数据库配置
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': env('DB_NAME'),
-        'USER': env('DB_USER'),
-        'PASSWORD': env('DB_PASSWORD'),
-        'HOST': env('DB_HOST'),
-        'PORT': env('DB_PORT'),
+# 数据库：若未提供 MySQL 必需参数，则回退到 SQLite 以便本地开发
+DB_NAME = env('DB_NAME', default=None)
+DB_USER = env('DB_USER', default=None)
+DB_PASSWORD = env('DB_PASSWORD', default=None)
+DB_HOST = env('DB_HOST', default=None)
+DB_PORT = env('DB_PORT', default=None)
+
+if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT]):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': DB_NAME,
+            'USER': DB_USER,
+            'PASSWORD': DB_PASSWORD,
+            'HOST': DB_HOST,
+            'PORT': DB_PORT,
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # 密码验证
@@ -143,8 +160,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # REST Framework 配置
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    "DEFAULT_AUTHENTICATION_CLASSES": (),  # 关闭所有认证（包括 JWT）
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.AllowAny",  # 全局放行
     ),
 }
 
