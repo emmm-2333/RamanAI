@@ -88,7 +88,7 @@ const initChart = () => {
       nameLocation: "middle",
       nameGap: 30,
       boundaryGap: false,
-      data: Array.from({ length: 100 }, (_, i) => i + 400),
+      data: Array.from({ length: 1801 }, (_, i) => i + 400),
       axisLine: { lineStyle: { color: isDark.value ? "#666" : "#999" } },
     },
     yAxis: {
@@ -106,7 +106,7 @@ const initChart = () => {
       {
         name: "原始光谱",
         type: "line",
-        data: Array.from({ length: 100 }, () => Math.random() * 1000),
+        data: [],
         smooth: true,
         showSymbol: false,
         itemStyle: { color: "#0072C6" },
@@ -181,20 +181,22 @@ const updateChartWithResult = (result) => {
   const isMalignant = result.diagnosis_result === "Malignant";
   const color = isMalignant ? "#FF0000" : "#28a745";
 
-  // 模拟数据更新
-  const newData = Array.from(
-    { length: 100 },
-    () => Math.random() * 1000 + (isMalignant ? 500 : 0),
-  );
+  // 获取真实数据
+  const spectralData = result.spectral_data;
+  const xData = spectralData ? spectralData.x : [];
+  const yData = spectralData ? spectralData.y : [];
 
   myChart.setOption({
     title: {
       text: `诊断结果: ${result.diagnosis_result} (置信度: ${(result.confidence_score * 100).toFixed(2)}%)`,
       textStyle: { color: color, fontWeight: "bold" },
     },
+    xAxis: {
+        data: xData.length > 0 ? xData : Array.from({ length: 1801 }, (_, i) => i + 400)
+    },
     series: [
       {
-        data: newData,
+        data: yData,
         itemStyle: { color: color },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [

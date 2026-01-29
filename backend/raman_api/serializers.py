@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import UserProfile, Patient, SpectrumRecord
+from .models import UserProfile, Patient, SpectrumRecord, ModelVersion, DiagnosisFeedback
 
 class UserSerializer(serializers.ModelSerializer):
     """
@@ -43,4 +43,17 @@ class SpectrumRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = SpectrumRecord
         fields = '__all__'
-        read_only_fields = ('diagnosis_result', 'confidence_score', 'processed_path', 'created_at', 'uploaded_by')
+        read_only_fields = ('diagnosis_result', 'confidence_score', 'processed_path', 'created_at', 'uploaded_by', 'spectral_data', 'metadata')
+
+class ModelVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ModelVersion
+        fields = '__all__'
+
+class DiagnosisFeedbackSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.CharField(source='doctor.username', read_only=True)
+
+    class Meta:
+        model = DiagnosisFeedback
+        fields = '__all__'
+        read_only_fields = ('doctor', 'created_at')

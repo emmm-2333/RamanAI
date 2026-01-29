@@ -3,10 +3,15 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth.models import User
-from .serializers import UserSerializer, SpectrumRecordSerializer
-from .models import SpectrumRecord, Patient
-import os
+from .serializers import UserSerializer, SpectrumRecordSerializer, ModelVersionSerializer, DiagnosisFeedbackSerializer
+from .models import SpectrumRecord, Patient, ModelVersion, DiagnosisFeedback
+from .ml_engine import MLEngine
+from .device_driver import MockSpectrometer
+import pandas as pd
 import random
+
+# Initialize ML Engine
+MLEngine.load_active_model()
 
 class RegisterView(generics.CreateAPIView):
     """
@@ -41,39 +46,124 @@ class UploadView(APIView):
         if not file_obj:
             return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 1. 简单的文件保存逻辑 (实际应保存到 MEDIA_ROOT)
-        # 这里为了演示，暂时不真正保存到磁盘，而是直接读取内容模拟处理
-        # 实际项目中应使用 default_storage.save()
-        
-        # 2. 模拟数据处理和推理
-        # TODO: 集成 PyTorch 模型进行真实推理
-        # 模拟结果：
-        is_malignant = random.choice([True, False])
-        diagnosis = "Malignant" if is_malignant else "Benign"
-        confidence = round(random.uniform(0.7, 0.99), 4)
+        # Parse file content
+        try:
+            if file_obj.name.endswith('.csv'):
+                df = pd.read_csv(file_obj)
+            else:
+                df = pd.read_csv(file_obj, delimiter='\t')
+        except Exception as e:
+            return Response({"error": f"Failed to read file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 3. 创建关联的 Patient (如果不存在则创建，这里简化为每次创建新病人或查找特定ID)
-        # 实际逻辑应从请求中获取 patient_id 或 patient info
-        # 这里为了简化流程，如果未提供 patient_id，则创建一个匿名/临时病人
+        # Assume file format: columns are wavenumbers, first row is intensities
+        # Or standard Raman format: col1=Wavenumber, col2=Intensity
+        # For simplicity, let's assume the uploaded file is a standard 2-column format
+        # or similar to the training data structure.
+        # Fallback: if it matches training data columns (400-2200), use that.
+        
+        spectral_x = []
+        spectral_y = []
+
+        try:
+            # Check if columns are integers (like training data)
+            cols = [c for c in df.columns if str(c).isdigit()]
+            if len(cols) > 100:
+                 # Wide format (1 row = 1 sample)
+                 cols.sort(key=int)
+                 spectral_x = [int(c) for c in cols]
+                 spectral_y = df.iloc[0][cols].tolist()
+            else:
+                 # Long format (col1=x, col2=y)
+                 if df.shape[1] >= 2:
+                     spectral_x = df.iloc[:, 0].tolist()
+                     spectral_y = df.iloc[:, 1].tolist()
+                 else:
+                     raise ValueError("Unknown file format")
+        except Exception as e:
+             return Response({"error": f"Data parsing error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Inference using MLEngine
+        diagnosis, confidence = MLEngine.predict(spectral_x, spectral_y)
+
+        # Create Patient
         patient_id = request.data.get('patient_id')
         if patient_id:
             try:
                 patient = Patient.objects.get(id=patient_id)
             except Patient.DoesNotExist:
-                 return Response({"error": "Patient not found"}, status=status.HTTP_404_NOT_FOUND)
+                 # Try finding by name/id logic if needed, or just create new
+                 patient = Patient.objects.create(name=f"Patient-{patient_id}", age=0, gender='F')
         else:
-            # 创建一个演示用病人
             patient = Patient.objects.create(name="Anonymous", age=50, gender='F')
 
-        # 4. 保存记录
+        # Save Record
+        spectral_data = {'x': spectral_x, 'y': spectral_y}
+        
         record = SpectrumRecord.objects.create(
             patient=patient,
-            file_path=file_obj.name, # 仅保存文件名作为演示
-            processed_path=f"processed_{file_obj.name}.json",
+            file_path=file_obj.name,
             diagnosis_result=diagnosis,
             confidence_score=confidence,
-            uploaded_by=request.user
+            uploaded_by=request.user,
+            spectral_data=spectral_data
         )
 
         serializer = SpectrumRecordSerializer(record)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class DeviceView(APIView):
+    """
+    光谱仪设备接口
+    """
+    permission_classes = (permissions.IsAuthenticated,)
+    
+    def post(self, request):
+        action = request.data.get('action')
+        
+        if action == 'capture':
+            try:
+                # Use Mock Driver for now
+                driver = MockSpectrometer()
+                driver.open_device()
+                wavelengths, intensities = driver.capture_spectrum()
+                driver.close_device()
+                
+                return Response({
+                    'status': 'success',
+                    'data': {
+                        'x': wavelengths,
+                        'y': intensities
+                    }
+                })
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+
+class ModelManageView(generics.ListCreateAPIView):
+    """
+    模型版本管理接口
+    """
+    queryset = ModelVersion.objects.all().order_by('-created_at')
+    serializer_class = ModelVersionSerializer
+    permission_classes = (permissions.IsAuthenticated,) # Should be Admin only
+
+    def post(self, request, *args, **kwargs):
+        # Custom logic to trigger training
+        action = request.data.get('action')
+        if action == 'train':
+            # Trigger async task (celery recommended, but sync for now)
+            # MLEngine.train_new_version(...)
+            return Response({'status': 'Training started (simulated)'})
+        return super().post(request, *args, **kwargs)
+
+class FeedbackView(generics.CreateAPIView):
+    """
+    诊断反馈接口
+    """
+    queryset = DiagnosisFeedback.objects.all()
+    serializer_class = DiagnosisFeedbackSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def perform_create(self, serializer):
+        serializer.save(doctor=self.request.user)
