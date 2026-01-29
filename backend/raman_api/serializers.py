@@ -35,7 +35,19 @@ class PatientSerializer(serializers.ModelSerializer):
 
 class SpectrumRecordSerializer(serializers.ModelSerializer):
     """
-    光谱记录序列化器。
+    光谱记录序列化器 (列表视图优化版)。
+    """
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    uploaded_by_name = serializers.CharField(source='uploaded_by.username', read_only=True)
+
+    class Meta:
+        model = SpectrumRecord
+        exclude = ('spectral_data',) # 列表接口不返回巨大的光谱数据字段
+        read_only_fields = ('diagnosis_result', 'confidence_score', 'processed_path', 'created_at', 'uploaded_by', 'metadata')
+
+class SpectrumRecordDetailSerializer(serializers.ModelSerializer):
+    """
+    光谱记录详情序列化器 (包含完整数据)。
     """
     patient_name = serializers.CharField(source='patient.name', read_only=True)
     uploaded_by_name = serializers.CharField(source='uploaded_by.username', read_only=True)
@@ -43,7 +55,7 @@ class SpectrumRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = SpectrumRecord
         fields = '__all__'
-        read_only_fields = ('diagnosis_result', 'confidence_score', 'processed_path', 'created_at', 'uploaded_by', 'spectral_data', 'metadata')
+        read_only_fields = ('diagnosis_result', 'confidence_score', 'processed_path', 'created_at', 'uploaded_by', 'metadata')
 
 class ModelVersionSerializer(serializers.ModelSerializer):
     class Meta:

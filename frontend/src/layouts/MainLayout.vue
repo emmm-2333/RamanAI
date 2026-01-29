@@ -1,6 +1,7 @@
 <script setup>
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useDark } from '@vueuse/core';
 import ThemeToggle from '../components/ThemeToggle.vue';
 import {
   FirstAidKit,
@@ -15,6 +16,7 @@ import {
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
+const isDark = useDark();
 
 const handleLogout = () => {
   authStore.logout();

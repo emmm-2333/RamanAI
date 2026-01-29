@@ -2,7 +2,8 @@
 import { ref, onMounted } from 'vue';
 import spectrumApi from '../../api/spectrum';
 import { useRouter } from 'vue-router';
-import { Search, Refresh, View, Download } from '@element-plus/icons-vue';
+import { Search, Refresh, View, Download, Upload } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 
 const handleExport = async () => {
     // Basic CSV export of current list metadata
@@ -40,6 +41,39 @@ const queryParams = ref({
   diagnosis: ''
 });
 
+// Batch Import
+const batchImportDialogVisible = ref(false);
+const isBatchUploading = ref(false);
+const batchFileList = ref([]);
+
+const handleBatchUpload = async () => {
+  if (batchFileList.value.length === 0) {
+    ElMessage.warning('请选择文件');
+    return;
+  }
+  
+  isBatchUploading.value = true;
+  const formData = new FormData();
+  formData.append('file', batchFileList.value[0].raw);
+  
+  try {
+    const res = await spectrumApi.batchUploadSpectrum(formData);
+    ElMessage.success(`导入成功: ${res.data.imported} 条记录`);
+    if (res.data.errors && res.data.errors.length > 0) {
+       ElMessage.warning(`部分失败: ${res.data.errors.length} 条，请查看控制台`);
+       console.warn('Import errors:', res.data.errors);
+    }
+    batchImportDialogVisible.value = false;
+    batchFileList.value = [];
+    fetchRecords();
+  } catch (error) {
+    ElMessage.error('批量导入失败');
+    console.error(error);
+  } finally {
+    isBatchUploading.value = false;
+  }
+};
+
 const fetchRecords = async () => {
   loading.value = true;
   try {
@@ -71,7 +105,7 @@ const handleView = (row) => {
 };
 
 onMounted(() => {
-  // fetchRecords(); // Commented out until backend supports listing
+  fetchRecords();
 });
 </script>
 
@@ -93,13 +127,14 @@ onMounted(() => {
         </el-select>
         <el-button type="primary" @click="handleSearch">查询</el-button>
         <el-button type="success" :icon="Download" @click="handleExport">导出 CSV</el-button>
+        <el-button type="warning" :icon="Upload" @click="batchImportDialogVisible = true">批量导入</el-button>
       </div>
     </div>
 
     <div class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow p-4 overflow-hidden">
       <el-table :data="records" v-loading="loading" height="100%" stripe style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="patient_name" label="患者姓名" width="150" />
+        <el-table-column prop="patient_name" label="患者姓名/ID" width="150" />
         <el-table-column prop="diagnosis_result" label="诊断结果">
           <template #default="{ row }">
             <el-tag :type="row.diagnosis_result === 'Malignant' ? 'danger' : 'success'">
@@ -134,5 +169,33 @@ onMounted(() => {
         @current-change="fetchRecords"
       />
     </div>
+
+    <!-- Batch Import Dialog -->
+    <el-dialog v-model="batchImportDialogVisible" title="批量导入数据集" width="400px">
+      <div class="flex flex-col gap-4">
+        <el-alert title="支持格式：.zip (多个文件) 或 .xlsx (宽表格式)" type="info" :closable="false" />
+        <el-upload
+          class="w-full"
+          drag
+          action="#"
+          :auto-upload="false"
+          :file-list="batchFileList"
+          :limit="1"
+          :on-change="(file) => batchFileList = [file]"
+          :on-remove="() => batchFileList = []"
+        >
+          <el-icon class="el-icon--upload"><Upload /></el-icon>
+          <div class="el-upload__text">
+            拖拽文件至此 或 <em>点击上传</em>
+          </div>
+        </el-upload>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="batchImportDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleBatchUpload" :loading="isBatchUploading">开始导入</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>

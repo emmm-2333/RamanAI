@@ -90,31 +90,16 @@ WSGI_APPLICATION = "raman_backend.wsgi.application"
 # 数据库配置
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-# 数据库：若未提供 MySQL 必需参数，则回退到 SQLite 以便本地开发
-DB_NAME = env('DB_NAME', default=None)
-DB_USER = env('DB_USER', default=None)
-DB_PASSWORD = env('DB_PASSWORD', default=None)
-DB_HOST = env('DB_HOST', default=None)
-DB_PORT = env('DB_PORT', default=None)
-
-if all([DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT]):
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.mysql',
-            'NAME': DB_NAME,
-            'USER': DB_USER,
-            'PASSWORD': DB_PASSWORD,
-            'HOST': DB_HOST,
-            'PORT': DB_PORT,
-        }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'raman_db',
+        'USER': 'root',
+        'PASSWORD': '7355608',
+        'HOST': 'localhost',
+        'PORT': '3306',
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 
 # 密码验证
@@ -166,6 +151,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 10,
 }
 
 # JWT 配置
@@ -181,4 +168,6 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # Vite 默认端口
     "http://127.0.0.1:5173",
+    "http://localhost:5174",  # Vite 备用端口
+    "http://127.0.0.1:5174",
 ]

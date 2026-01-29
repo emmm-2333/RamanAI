@@ -8,7 +8,10 @@ const loading = ref(false);
 const models = ref([]);
 const trainingDialogVisible = ref(false);
 const trainForm = ref({
-  description: ''
+  description: '',
+  algorithm: 'rf',
+  test_size: 0.2,
+  n_estimators: 100
 });
 
 const fetchModels = async () => {
@@ -40,7 +43,7 @@ const handleTrain = async () => {
   });
 
   try {
-    await modelApi.trainModel(trainForm.value.description);
+    await modelApi.trainModel(trainForm.value);
     loadingInstance.close();
     ElMessage.success('训练完成，新模型已上线');
     fetchModels();
@@ -87,11 +90,34 @@ onMounted(() => {
     </div>
 
     <!-- Training Dialog -->
-    <el-dialog v-model="trainingDialogVisible" title="触发模型训练" width="30%">
+    <el-dialog v-model="trainingDialogVisible" title="触发模型训练" width="40%">
       <el-form :model="trainForm" label-position="top">
         <el-form-item label="训练描述 / 备注">
           <el-input v-model="trainForm.description" type="textarea" placeholder="例如：增加 100 条新样本后的重训" />
         </el-form-item>
+        <el-row :gutter="20">
+           <el-col :span="12">
+             <el-form-item label="算法模型">
+               <el-select v-model="trainForm.algorithm" placeholder="Random Forest">
+                 <el-option label="Random Forest" value="rf" />
+                 <el-option label="SVM" value="svm" disabled />
+                 <el-option label="XGBoost" value="xgb" disabled />
+               </el-select>
+             </el-form-item>
+           </el-col>
+           <el-col :span="12">
+             <el-form-item label="测试集比例">
+               <el-slider v-model="trainForm.test_size" :min="0.1" :max="0.5" :step="0.05" show-input />
+             </el-form-item>
+           </el-col>
+        </el-row>
+        <el-row :gutter="20">
+           <el-col :span="12">
+             <el-form-item label="树的数量 (n_estimators)">
+               <el-input-number v-model="trainForm.n_estimators" :min="10" :max="500" :step="10" />
+             </el-form-item>
+           </el-col>
+        </el-row>
       </el-form>
       <template #footer>
         <span class="dialog-footer">

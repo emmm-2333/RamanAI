@@ -1,6 +1,6 @@
 from django.urls import path, include
-from .views import RegisterView, UploadView, MeView, DeviceView, ModelManageView, FeedbackView, SpectrumRecordViewSet
-from .analysis_views import PCAAnalysisView
+from .views import RegisterView, UploadView, MeView, DeviceView, ModelManageView, FeedbackView, SpectrumRecordViewSet, BatchImportView
+from .analysis_views import PCAAnalysisView, ClusteringAnalysisView
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
@@ -16,9 +16,11 @@ urlpatterns = [
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/me/', MeView.as_view(), name='auth_me'),
     path('upload/', UploadView.as_view(), name='upload_spectrum'),
+    path('upload/batch/', BatchImportView.as_view(), name='batch_import'),
     path('device/', DeviceView.as_view(), name='device_control'),
     path('models/', ModelManageView.as_view(), name='model_manage'),
     path('feedback/', FeedbackView.as_view(), name='diagnosis_feedback'),
     path('analysis/pca/', PCAAnalysisView.as_view(), name='analysis_pca'),
+    path('analysis/cluster/', ClusteringAnalysisView.as_view(), name='analysis_cluster'),
     path('', include(router.urls)),
 ]
