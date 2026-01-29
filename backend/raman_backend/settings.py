@@ -160,9 +160,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # REST Framework 配置
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (),  # 关闭所有认证（包括 JWT）
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
     "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.AllowAny",  # 全局放行
+        "rest_framework.permissions.IsAuthenticated",
     ),
 }
 

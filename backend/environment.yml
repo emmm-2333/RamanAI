@@ -16,6 +16,6 @@ dependencies:
   - openpyxl
   - cryptography
   - pytorch
-  - pip  # 必须添加这一行！
+  - pip # 必须添加这一行！
   - pip:
-    - djangorestframework-simplejwt
+      - djangorestframework-simplejwt

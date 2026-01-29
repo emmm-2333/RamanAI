@@ -1,4 +1,5 @@
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -6,6 +7,7 @@ from django.contrib.auth.models import User
 from .serializers import UserSerializer, SpectrumRecordSerializer, ModelVersionSerializer, DiagnosisFeedbackSerializer
 from .models import SpectrumRecord, Patient, ModelVersion, DiagnosisFeedback
 from .ml_engine import MLEngine
+from .preprocessing import RamanPreprocessor
 from .device_driver import MockSpectrometer
 import pandas as pd
 import random
@@ -33,6 +35,78 @@ class MeView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
+class SpectrumRecordViewSet(viewsets.ModelViewSet):
+    """
+    光谱记录管理接口：
+    - GET /records/ : 获取记录列表 (支持分页, search=name/id, diagnosis=Malignant)
+    - GET /records/{id}/ : 获取记录详情
+    - POST /upload/ : 上传记录 (保留 UploadView 逻辑，或迁移至此)
+    """
+    queryset = SpectrumRecord.objects.all().order_by('-created_at')
+    serializer_class = SpectrumRecordSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        search = self.request.query_params.get('search')
+        diagnosis = self.request.query_params.get('diagnosis')
+        
+        if search:
+            qs = qs.filter(patient__name__icontains=search) | qs.filter(patient__id__icontains=search)
+        if diagnosis:
+            qs = qs.filter(diagnosis_result=diagnosis)
+            
+        return qs
+
+    @action(detail=False, methods=['post'])
+    def batch_delete(self, request):
+        ids = request.data.get('ids', [])
+        if not ids:
+             return Response({'error': 'No ids provided'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Only admin should be able to delete? Or authenticated users can delete their own?
+        # For MVP, allow authenticated users to delete any
+        deleted_count, _ = SpectrumRecord.objects.filter(id__in=ids).delete()
+        return Response({'status': 'success', 'deleted_count': deleted_count})
+
+    @action(detail=False, methods=['post'])
+    def batch_add_to_training(self, request):
+        ids = request.data.get('ids', [])
+        if not ids:
+             return Response({'error': 'No ids provided'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        updated_count = SpectrumRecord.objects.filter(id__in=ids).update(is_training_data=True)
+        return Response({'status': 'success', 'updated_count': updated_count})
+
+    @action(detail=True, methods=['post'])
+    def preprocess(self, request, pk=None):
+        """
+        对单条记录进行预处理并返回处理后的数据
+        """
+        record = self.get_object()
+        if not record.spectral_data or 'y' not in record.spectral_data:
+            return Response({'error': 'No spectral data found'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        config = request.data.get('config', {})
+        # Default config if not provided
+        # config example: {'smooth': True, 'baseline': True, 'normalize': True, 'baseline_method': 'poly', 'derivative': 0}
+        
+        wavenumbers = record.spectral_data.get('x', [])
+        raw_y = record.spectral_data['y']
+        
+        try:
+            processed_y = RamanPreprocessor.process_pipeline(wavenumbers, raw_y, config)
+            # Ensure JSON serializable (numpy array to list)
+            if hasattr(processed_y, 'tolist'):
+                processed_y = processed_y.tolist()
+                
+            return Response({
+                'x': wavenumbers,
+                'y': processed_y
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class UploadView(APIView):
     """
     光谱文件上传与诊断接口。
@@ -46,12 +120,24 @@ class UploadView(APIView):
         if not file_obj:
             return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Check file size (limit 30MB)
+        if file_obj.size > 30 * 1024 * 1024:
+            return Response({"error": "File size exceeds 30MB limit"}, status=status.HTTP_400_BAD_REQUEST)
+
         # Parse file content
         try:
             if file_obj.name.endswith('.csv'):
                 df = pd.read_csv(file_obj)
+            elif file_obj.name.endswith('.xlsx'):
+                df = pd.read_excel(file_obj, engine='openpyxl')
             else:
-                df = pd.read_csv(file_obj, delimiter='\t')
+                # Default to tab-delimited or try auto-detection
+                try:
+                    df = pd.read_csv(file_obj, delimiter='\t')
+                except:
+                    # If parsing fails, try read_excel as fallback if extension was missing but format is excel
+                    # But better to rely on extension. Let's just return error if not matched above or generic read failed.
+                    return Response({"error": "Unsupported file format. Please upload .csv, .xlsx, or .txt"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": f"Failed to read file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -66,17 +152,42 @@ class UploadView(APIView):
 
         try:
             # Check if columns are integers (like training data)
-            cols = [c for c in df.columns if str(c).isdigit()]
+            # Some excel columns might be read as floats or strings, try to convert
+            cols = []
+            valid_cols_map = {} # map valid int col to original col name
+            
+            for c in df.columns:
+                try:
+                    # Convert to float then int to handle '400.0'
+                    val = int(float(str(c)))
+                    if val > 0: # spectral data usually positive wavenumbers
+                        cols.append(val)
+                        valid_cols_map[val] = c
+                except:
+                    continue
+            
             if len(cols) > 100:
                  # Wide format (1 row = 1 sample)
-                 cols.sort(key=int)
-                 spectral_x = [int(c) for c in cols]
-                 spectral_y = df.iloc[0][cols].tolist()
+                 # Sort columns by wavenumber
+                 cols.sort()
+                 spectral_x = cols
+                 # Use the mapped original column names to fetch data
+                 original_cols = [valid_cols_map[c] for c in cols]
+                 # Take the first row
+                 spectral_y = df.iloc[0][original_cols].fillna(0).tolist()
             else:
                  # Long format (col1=x, col2=y)
                  if df.shape[1] >= 2:
-                     spectral_x = df.iloc[:, 0].tolist()
-                     spectral_y = df.iloc[:, 1].tolist()
+                     # Assume first column is X, second is Y
+                     # Need to ensure they are numeric
+                     df_clean = df.iloc[:, [0, 1]].dropna()
+                     # Try to convert to numeric, coerce errors
+                     df_clean[df.columns[0]] = pd.to_numeric(df_clean[df.columns[0]], errors='coerce')
+                     df_clean[df.columns[1]] = pd.to_numeric(df_clean[df.columns[1]], errors='coerce')
+                     df_clean = df_clean.dropna()
+                     
+                     spectral_x = df_clean.iloc[:, 0].tolist()
+                     spectral_y = df_clean.iloc[:, 1].tolist()
                  else:
                      raise ValueError("Unknown file format")
         except Exception as e:
@@ -153,8 +264,14 @@ class ModelManageView(generics.ListCreateAPIView):
         action = request.data.get('action')
         if action == 'train':
             # Trigger async task (celery recommended, but sync for now)
-            # MLEngine.train_new_version(...)
-            return Response({'status': 'Training started (simulated)'})
+            try:
+                result = MLEngine.train_new_version(
+                    description=request.data.get('description', 'Manual trigger')
+                )
+                return Response(result)
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
         return super().post(request, *args, **kwargs)
 
 class FeedbackView(generics.CreateAPIView):

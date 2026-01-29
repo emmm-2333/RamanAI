@@ -63,12 +63,79 @@ class MLEngine:
             return "Unknown", 0.0
 
     @classmethod
-    def train_new_version(cls, version_name, description=""):
+    def train_new_version(cls, version_name=None, description=""):
         """
-        触发新模型训练 (Placeholder)
+        触发新模型训练
         """
-        # 1. Fetch data from SpectrumRecord where is_training_data=True
-        # 2. Train sklearn model
-        # 3. Save .pkl
-        # 4. Create ModelVersion record
-        pass
+        from .models import SpectrumRecord, ModelVersion
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import accuracy_score, classification_report
+        import joblib
+        from pathlib import Path
+        import datetime
+
+        print("Starting training pipeline...")
+        
+        # 1. Fetch data
+        records = SpectrumRecord.objects.filter(is_training_data=True)
+        if not records.exists():
+            return {"status": "error", "message": "No training data found"}
+
+        X = []
+        y = []
+        
+        for record in records:
+            if not record.spectral_data or 'y' not in record.spectral_data:
+                continue
+            
+            # Preprocess
+            raw_y = record.spectral_data['y']
+            wavenumbers = record.spectral_data.get('x', [])
+            processed_y = RamanPreprocessor.process_pipeline(wavenumbers, raw_y)
+            
+            X.append(processed_y)
+            label = 1 if record.diagnosis_result == 'Malignant' else 0
+            y.append(label)
+
+        X = np.array(X)
+        y = np.array(y)
+        
+        # 2. Train
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train, y_train)
+        
+        # 3. Evaluate
+        y_pred = clf.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        report = classification_report(y_test, y_pred, output_dict=True)
+        
+        # 4. Save
+        if not version_name:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
+            version_name = f"v{timestamp}"
+            
+        models_dir = Path(settings.BASE_DIR) / "models_storage"
+        models_dir.mkdir(exist_ok=True)
+        model_path = models_dir / f"rf_{version_name}.pkl"
+        
+        joblib.dump(clf, model_path)
+        
+        # 5. Register
+        ModelVersion.objects.create(
+            version=version_name,
+            file_path=str(model_path),
+            accuracy=acc,
+            metrics=report,
+            is_active=True, # Auto activate
+            description=description or "Auto-trained model"
+        )
+        
+        # Deactivate others
+        ModelVersion.objects.exclude(version=version_name).update(is_active=False)
+        
+        # Reload current model
+        cls.load_active_model()
+        
+        return {"status": "success", "version": version_name, "accuracy": acc}

@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.signal import savgol_filter
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 from sklearn.preprocessing import MinMaxScaler
 
 class RamanPreprocessor:
@@ -56,12 +58,58 @@ class RamanPreprocessor:
             return y_data
 
     @staticmethod
+    def baseline_als(y_data, lam=100000, p=0.01, niter=10):
+        """
+        Asymmetric Least Squares Smoothing (ALS) for baseline correction.
+        Reference: Eilers, P. H. C. (2004). "Baseline Correction with Asymmetric Least Squares Smoothing".
+        """
+        L = len(y_data)
+        D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
+        w = np.ones(L)
+        for i in range(niter):
+            W = sparse.spdiags(w, 0, L, L)
+            Z = W + lam * D.dot(D.transpose())
+            z = spsolve(Z, w*y_data)
+            w = p * (y_data > z) + (1-p) * (y_data < z)
+        return y_data - z
+
+    @staticmethod
+    def normalize_snv(y_data):
+        """
+        Standard Normal Variate (SNV) Normalization
+        """
+        y_array = np.array(y_data)
+        mean = np.mean(y_array)
+        std = np.std(y_array)
+        if std == 0:
+            return y_array
+        return (y_array - mean) / std
+
+    @staticmethod
+    def derivative(x_data, y_data, order=1):
+        """
+        Calculate derivative (1st or 2nd)
+        Note: This is a simple finite difference. For better results, use SavGol derivative.
+        """
+        y_array = np.array(y_data)
+        x_array = np.array(x_data)
+        
+        if order == 1:
+            dy = np.gradient(y_array, x_array)
+            return dy
+        elif order == 2:
+            dy = np.gradient(y_array, x_array)
+            d2y = np.gradient(dy, x_array)
+            return d2y
+        return y_array
+
+    @staticmethod
     def process_pipeline(x_data, y_data, config=None):
         """
         预处理流水线
         """
         if config is None:
-            config = {'smooth': True, 'baseline': True, 'normalize': True}
+            config = {'smooth': True, 'baseline': True, 'normalize': True, 'baseline_method': 'poly', 'normalize_method': 'minmax', 'derivative': 0}
         
         y_processed = np.array(y_data)
 
@@ -69,9 +117,18 @@ class RamanPreprocessor:
             y_processed = RamanPreprocessor.smooth_savgol(y_processed)
         
         if config.get('baseline'):
-            y_processed = RamanPreprocessor.baseline_correction_poly(x_data, y_processed)
-            
+            if config.get('baseline_method') == 'als':
+                 y_processed = RamanPreprocessor.baseline_als(y_processed)
+            else:
+                 y_processed = RamanPreprocessor.baseline_correction_poly(x_data, y_processed)
+        
+        if config.get('derivative', 0) > 0:
+            y_processed = RamanPreprocessor.derivative(x_data, y_processed, order=config.get('derivative'))
+
         if config.get('normalize'):
-            y_processed = RamanPreprocessor.normalize_minmax(y_processed)
+            if config.get('normalize_method') == 'snv':
+                y_processed = RamanPreprocessor.normalize_snv(y_processed)
+            else:
+                y_processed = RamanPreprocessor.normalize_minmax(y_processed)
             
         return y_processed
