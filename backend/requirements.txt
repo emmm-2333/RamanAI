@@ -6,4 +6,7 @@ mysqlclient
 pandas
 numpy
 scipy
+scikit-learn
+openpyxl
+cryptography
 torch

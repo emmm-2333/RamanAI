@@ -12,6 +12,9 @@ dependencies:
   - pandas
   - numpy
   - scipy
+  - scikit-learn
+  - openpyxl
+  - cryptography
   - pytorch
   - pip  # 必须添加这一行！
   - pip:

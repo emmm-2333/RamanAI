@@ -49,5 +49,39 @@ class SpectrumRecord(models.Model):
     
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, help_text="上传医生")
 
+    # 新增字段用于存储原始数据和元数据
+    spectral_data = models.JSONField(blank=True, null=True, help_text="光谱数据 {'x': [], 'y': []}")
+    metadata = models.JSONField(blank=True, null=True, help_text="元数据 (ER, HER2, etc)")
+    is_training_data = models.BooleanField(default=False, help_text="是否作为训练集")
+
     def __str__(self):
         return f"Record {self.id} - {self.diagnosis_result}"
+
+class ModelVersion(models.Model):
+    """
+    模型版本管理
+    """
+    version = models.CharField(max_length=50, unique=True, help_text="版本号 (e.g. v1.0.0)")
+    file_path = models.CharField(max_length=500, help_text="模型文件路径 (.pkl/.pth)")
+    accuracy = models.FloatField(blank=True, null=True, help_text="验证集准确率")
+    metrics = models.JSONField(blank=True, null=True, help_text="详细指标 (Precision, Recall)")
+    is_active = models.BooleanField(default=False, help_text="是否为当前生产模型")
+    created_at = models.DateTimeField(auto_now_add=True)
+    description = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Model {self.version} ({'Active' if self.is_active else 'Inactive'})"
+
+class DiagnosisFeedback(models.Model):
+    """
+    医生反馈/修正记录 (Human-in-the-loop)
+    """
+    record = models.ForeignKey(SpectrumRecord, on_delete=models.CASCADE, related_name='feedbacks')
+    doctor = models.ForeignKey(User, on_delete=models.CASCADE)
+    original_diagnosis = models.CharField(max_length=50)
+    corrected_diagnosis = models.CharField(max_length=50)
+    comments = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Feedback on {self.record.id} by {self.doctor.username}"
