@@ -134,11 +134,26 @@ onMounted(() => {
     <div class="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow p-4 overflow-hidden">
       <el-table :data="records" v-loading="loading" height="100%" stripe style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="patient_name" label="患者姓名/ID" width="150" />
+        <el-table-column label="序号" width="80">
+          <template #default="{ row }">
+            {{ row.metadata?.['序号'] || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="病历号" width="120">
+          <template #default="{ row }">
+            {{ row.metadata?.['病历号'] || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="patient_name" label="患者姓名" width="120" />
+        <el-table-column label="收集日期" width="120">
+          <template #default="{ row }">
+            {{ row.metadata?.['收集日期'] || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="diagnosis_result" label="诊断结果">
           <template #default="{ row }">
-            <el-tag :type="row.diagnosis_result === 'Malignant' ? 'danger' : 'success'">
-              {{ row.diagnosis_result }}
+            <el-tag :type="row.diagnosis_result === 'Malignant' ? 'danger' : (row.diagnosis_result === 'Benign' ? 'success' : 'info')">
+              {{ row.diagnosis_result === 'Malignant' ? '恶性' : (row.diagnosis_result === 'Benign' ? '良性' : '未知') }}
             </el-tag>
           </template>
         </el-table-column>

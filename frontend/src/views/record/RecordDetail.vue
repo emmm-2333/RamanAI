@@ -14,12 +14,6 @@ const record = ref(null);
 const chartContainer = ref(null);
 let myChart = null;
 
-const initChart = () => {
-  if (!chartContainer.value) return;
-  myChart = echarts.init(chartContainer.value, isDark.value ? 'dark' : undefined);
-  updateChart();
-};
-
 const preprocessConfig = ref({
   smooth: true,
   baseline: true,
@@ -34,13 +28,7 @@ const applyPreprocessing = async () => {
   loading.value = true;
   try {
     const res = await spectrumApi.preprocessRecord(record.value.id, preprocessConfig.value);
-    // Update local chart data without mutating original record (optional)
-    // Or just update the chart
-    const processedData = res.data; // {x: [], y: []}
-    
-    // Temporarily update record.value.spectral_data to show processed
-    // Ideally we should keep original and processed separate
-    // For now, let's just update the chart directly
+    const processedData = res.data;
     updateChartWithData(processedData.x, processedData.y);
   } catch (error) {
     console.error(error);
@@ -49,36 +37,27 @@ const applyPreprocessing = async () => {
   }
 };
 
-const updateChartWithData = (x, y) => {
-  if (!myChart || !record.value) return;
-  const isMalignant = record.value.diagnosis_result === 'Malignant';
-  const color = isMalignant ? '#FF0000' : '#28a745';
-  
-  myChart.setOption({
-    xAxis: {
-      data: x.length ? x : Array.from({length: y.length}, (_, i) => i + 400)
-    },
-    series: [
-      {
-        name: '当前样本',
-        data: y,
-        itemStyle: { color: color }
-      },
-      // Hide comparison line when processing changes to avoid confusion or re-calculate it?
-      // For simplicity, hide it or keep it static
-      {
-         name: '平均良性光谱 (模拟)',
-         data: [] // Hide it for now as it doesn't match processed scale
-      }
-    ]
-  });
+const initChart = () => {
+  if (!chartContainer.value) return;
+  myChart = echarts.init(chartContainer.value, isDark.value ? 'dark' : undefined);
+  updateChart();
 };
+
 const updateChart = () => {
-  if (!myChart || !record.value) return;
   
   const spectralData = record.value.spectral_data || { x: [], y: [] };
   const isMalignant = record.value.diagnosis_result === 'Malignant';
   const color = isMalignant ? '#FF0000' : '#28a745';
+  
+  // Ensure we have data
+  if (!spectralData.y || spectralData.y.length === 0) {
+      console.warn("No spectral data to display");
+      return;
+  }
+  
+  const xData = spectralData.x && spectralData.x.length === spectralData.y.length 
+      ? spectralData.x 
+      : Array.from({length: spectralData.y.length}, (_, i) => i + 400);
 
   const option = {
     backgroundColor: 'transparent',
@@ -87,10 +66,10 @@ const updateChart = () => {
       left: 'center'
     },
     tooltip: { trigger: 'axis' },
-    legend: { data: ['当前样本', '平均良性光谱 (模拟)'], bottom: 10 },
+    legend: { data: ['当前样本'], bottom: 10 },
     xAxis: {
       type: 'category',
-      data: spectralData.x.length ? spectralData.x : Array.from({length: spectralData.y.length}, (_, i) => i + 400),
+      data: xData,
       name: 'Wavenumber (cm⁻¹)',
       nameLocation: 'middle',
       nameGap: 30
@@ -113,19 +92,29 @@ const updateChart = () => {
             { offset: 1, color: isMalignant ? 'rgba(255, 0, 0, 0.05)' : 'rgba(40, 167, 69, 0.05)' }
           ])
         }
-      },
-      {
-        name: '平均良性光谱 (模拟)',
-        type: 'line',
-        data: spectralData.y.map(v => v * 0.8 + Math.random() * 50), // Mock data for comparison
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { type: 'dashed', width: 1 },
-        itemStyle: { color: '#999' }
       }
     ]
   };
   myChart.setOption(option);
+};
+
+const updateChartWithData = (x, y) => {
+  if (!myChart || !record.value) return;
+  const isMalignant = record.value.diagnosis_result === 'Malignant';
+  const color = isMalignant ? '#FF0000' : '#28a745';
+  
+  myChart.setOption({
+    xAxis: {
+      data: x.length ? x : Array.from({length: y.length}, (_, i) => i + 400)
+    },
+    series: [
+      {
+        name: '当前样本',
+        data: y,
+        itemStyle: { color: color }
+      }
+    ]
+  });
 };
 
 const fetchRecord = async () => {
@@ -133,7 +122,11 @@ const fetchRecord = async () => {
   try {
     const res = await spectrumApi.getRecord(route.params.id);
     record.value = res.data;
-    updateChart();
+    // Wait for DOM update
+    setTimeout(() => {
+        if (!myChart) initChart();
+        else updateChart();
+    }, 100);
   } catch (error) {
     console.error(error);
   } finally {

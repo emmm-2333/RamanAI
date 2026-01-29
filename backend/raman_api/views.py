@@ -60,7 +60,12 @@ class SpectrumRecordViewSet(viewsets.ModelViewSet):
         diagnosis = self.request.query_params.get('diagnosis')
         
         if search:
-            qs = qs.filter(patient__name__icontains=search) | qs.filter(patient__id__icontains=search)
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(patient__name__icontains=search) | 
+                Q(patient__id__icontains=search) |
+                Q(file_path__icontains=search)
+            )
         if diagnosis:
             qs = qs.filter(diagnosis_result=diagnosis)
             
@@ -364,24 +369,29 @@ class BatchImportView(APIView):
                                 
                                 if '良恶性' in metadata:
                                     diagnosis_col_val = str(metadata['良恶性'])
+                                elif '良恶性0：良性1.恶性' in metadata:
+                                    diagnosis_col_val = str(metadata['良恶性0：良性1.恶性'])
                                 elif 'Label' in metadata: # Sometimes Label implies diagnosis
                                     diagnosis_col_val = str(metadata['Label'])
                                 
-                                if diagnosis_col_val:
-                                    val_str = diagnosis_col_val
-                                    if '0' in val_str or '良' in val_str or 'Benign' in val_str:
+                                if diagnosis_col_val is not None:
+                                    val_str = diagnosis_col_val.strip()
+                                    # Strict Check: 0 or 1
+                                    if val_str == '0' or val_str == '0.0' or '良' in val_str or 'Benign' in val_str:
                                         diagnosis = 'Benign'
-                                    elif '1' in val_str or '恶' in val_str or 'Malignant' in val_str:
+                                    elif val_str == '1' or val_str == '1.0' or '恶' in val_str or 'Malignant' in val_str:
                                         diagnosis = 'Malignant'
                                 
                                 # If diagnosis not found in metadata, predict it
                                 confidence = 0.0
                                 if not diagnosis:
-                                    diagnosis, confidence = MLEngine.predict(wavenumbers, y)
+                                    # Fallback: only predict if no label is present
+                                    # diagnosis, confidence = MLEngine.predict(wavenumbers, y)
+                                    # As requested: do NOT predict during import if label is missing/ambiguous
+                                    diagnosis = 'Unknown'
+                                    confidence = 0.0
                                 else:
-                                    # If provided, set high confidence? Or re-verify? 
-                                    # Let's set confidence to 1.0 if manually provided, or still run predict to compare?
-                                    # For now, trust the label.
+                                    # If provided, set confidence to 1.0
                                     confidence = 1.0 
 
                                 # Create/Get Patient
