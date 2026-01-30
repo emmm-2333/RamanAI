@@ -26,8 +26,11 @@ api.interceptors.response.use(
     const authStore = useAuthStore();
     if (error.response) {
       if (error.response.status === 401) {
-        authStore.logout();
-        window.location.href = '/login';
+        // Avoid redirect loop if already on login page or if it's a login attempt failure
+        if (!window.location.pathname.includes('/login') && !error.config.url.includes('/auth/login/')) {
+            authStore.logout();
+            window.location.href = '/login';
+        }
       } else {
         ElMessage.error(error.response.data.error || 'Request failed');
       }

@@ -64,9 +64,10 @@ export const useAuthStore = defineStore("auth", {
         localStorage.setItem("user_info", JSON.stringify(this.user));
       } catch (error) {
         console.error("Fetch user failed:", error);
-        // 如果 Token 失效 (401)，自动登出
+        // 如果 Token 失效 (401)，自动登出并跳转
         if (error.response && error.response.status === 401) {
           this.logout();
+          window.location.href = '/login';
         }
       }
     },

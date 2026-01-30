@@ -39,6 +39,9 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Data exports
+data/csv/
+
 # Tests and coverage
 .coverage
 htmlcov/

@@ -2,6 +2,7 @@
 import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
+import ThemeToggle from "../components/ThemeToggle.vue";
 import { ElMessage } from "element-plus";
 import { User, Lock, FirstAidKit } from "@element-plus/icons-vue";
 
@@ -40,8 +41,11 @@ const handleLogin = async () => {
 
 <template>
   <div
-    class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 to-gray-200 dark:from-gray-900 dark:to-gray-800"
+    class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 to-gray-200 dark:from-gray-900 dark:to-gray-800 relative"
   >
+    <div class="absolute top-4 right-4 bg-white/80 backdrop-blur-sm p-2 rounded-full shadow-sm dark:bg-gray-800/80">
+      <ThemeToggle />
+    </div>
     <div
       class="w-full max-w-md p-10 bg-white rounded-xl shadow-lg border-t-4 border-medical-primary dark:bg-gray-800"
     >
