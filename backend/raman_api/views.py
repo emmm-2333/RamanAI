@@ -174,37 +174,40 @@ class UploadView(APIView):
             cols = []
             valid_cols_map = {} # map valid int col to original col name
             
-            for c in df.columns:
-                try:
-                    # Convert to float then int to handle '400.0'
-                    val = int(float(str(c)))
-                    if val >= 0: # spectral data usually positive wavenumbers (allow 0 for index-based)
-                        # Check if the data in this column is numeric
-                        # For headerless files, column names are just indices, so we must verify content
-                        val_in_row = df.iloc[0][c]
-                        try:
-                            float(val_in_row)
-                            cols.append(val)
-                            valid_cols_map[val] = c
-                        except:
-                            pass # Skip non-numeric column
-                except:
-                    continue
+            # --- New Logic for 1801 Spectral Points ---
+            # Assume first 1801 columns are spectral data (400-2200)
+            # Subsequent columns are metadata
             
-            if len(cols) > 100:
+            # Auto-generate standard wavenumbers for the first 1801 points
+            standard_wavenumbers = list(range(400, 2201)) # 400 to 2200 inclusive = 1801 points
+            
+            if len(df.columns) >= 1801:
                 # Wide format (1 row = 1 sample)
-                # Sort columns by wavenumber
-                cols.sort()
-                spectral_x = cols
-                # Use the mapped original column names to fetch data
-                original_cols = [valid_cols_map[c] for c in cols]
-                # Take the first row
-                # Ensure data is numeric (float)
-                row_series = df.iloc[0][original_cols]
+                # Map first 1801 columns to standard wavenumbers
+                spectral_x = standard_wavenumbers
+                
+                # Take the first row's first 1801 columns as Y data
+                # Ensure numeric
+                row_series = df.iloc[0, :1801]
                 spectral_y = pd.to_numeric(row_series, errors='coerce').fillna(0).tolist()
+                
+                # Process Metadata (columns after 1801)
+                metadata = {}
+                if len(df.columns) > 1801:
+                    meta_cols = df.columns[1801:]
+                    for idx, col_name in enumerate(meta_cols):
+                        val = df.iloc[0, 1801 + idx]
+                        # Store as string in metadata
+                        if pd.notna(val):
+                            metadata[str(col_name)] = str(val)
+                            
+                # Pass metadata to save logic (will need to update save block below)
+                
             else:
-                # Long format (col1=x, col2=y)
-                 if df.shape[1] >= 2:
+                # Fallback to old logic or Long format if columns < 1801
+                # (Keep existing logic for 2-column format)
+                if df.shape[1] >= 2 and df.shape[1] < 100:
+                     # Long format (col1=x, col2=y)
                      # Assume first column is X, second is Y
                      # Need to ensure they are numeric
                      df_clean = df.iloc[:, [0, 1]].dropna()
@@ -215,8 +218,10 @@ class UploadView(APIView):
                      
                      spectral_x = df_clean.iloc[:, 0].tolist()
                      spectral_y = df_clean.iloc[:, 1].tolist()
-                 else:
-                     raise ValueError("Unknown file format")
+                     metadata = {}
+                else:
+                     raise ValueError(f"Unknown file format. Expected 1801+ columns or 2 columns. Got {len(df.columns)}")
+                     
         except Exception as e:
              return Response({"error": f"Data parsing error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -234,7 +239,16 @@ class UploadView(APIView):
                     # Try finding by name/id logic if needed, or just create new
                     patient = Patient.objects.create(name=f"Patient-{patient_id}", age=0, gender='F')
             else:
-                patient = Patient.objects.create(name="Anonymous", age=50, gender='F')
+                # Try to get patient info from metadata if available
+                if 'metadata' in locals() and metadata:
+                     # Try to find common name fields
+                     p_name = metadata.get('姓名') or metadata.get('Name') or metadata.get('PatientID') or "Anonymous"
+                     # Use filter().first() to avoid MultipleObjectsReturned
+                     patient = Patient.objects.filter(name=p_name).first()
+                     if not patient:
+                         patient = Patient.objects.create(name=p_name, age=50, gender='F')
+                else:
+                    patient = Patient.objects.create(name="Anonymous", age=50, gender='F')
 
             # Save Record
             spectral_data = {'x': spectral_x, 'y': spectral_y}
@@ -245,10 +259,11 @@ class UploadView(APIView):
                 diagnosis_result=diagnosis,
                 confidence_score=confidence,
                 uploaded_by=request.user,
-                spectral_data=spectral_data
+                spectral_data=spectral_data,
+                metadata=metadata if 'metadata' in locals() else {}
             )
 
-            serializer = SpectrumRecordSerializer(record)
+            serializer = SpectrumRecordDetailSerializer(record)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
             
         except Exception as e:

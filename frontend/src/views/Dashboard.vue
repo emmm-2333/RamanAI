@@ -171,17 +171,33 @@ const updateChartWithResult = (result) => {
   const xData = spectralData ? spectralData.x : [];
   const yData = spectralData ? spectralData.y : [];
 
-  myChart.setOption({
+  // If xData is just indices (0, 1, 2...) or default range, we display it.
+  // Backend now ensures xData is 400-2200 for standard files.
+  
+  // Create a copy of xData to avoid reactivity issues with ECharts
+  let finalXData = [];
+  if (xData && xData.length > 0) {
+      finalXData = [...xData];
+  } else {
+      // Fallback generation
+      const len = (yData && yData.length > 0) ? yData.length : 1801;
+      finalXData = Array.from({ length: len }, (_, i) => i + 400);
+  }
+
+  // Deep copy yData as well
+  const finalYData = yData ? [...yData] : [];
+
+  const option = {
     title: {
       text: `诊断结果: ${result.diagnosis_result} (置信度: ${(result.confidence_score * 100).toFixed(2)}%)`,
       textStyle: { color: color, fontWeight: "bold" },
     },
     xAxis: {
-        data: xData.length > 0 ? xData : Array.from({ length: 1801 }, (_, i) => i + 400)
+        data: finalXData
     },
     series: [
       {
-        data: yData,
+        data: finalYData,
         itemStyle: { color: color },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -201,7 +217,10 @@ const updateChartWithResult = (result) => {
         },
       },
     ],
-  });
+  };
+
+  // Use notMerge=true to force complete refresh
+  myChart.setOption(option);
 };
 </script>
 
