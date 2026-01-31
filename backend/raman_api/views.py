@@ -141,6 +141,11 @@ class UploadView(APIView):
         try:
             if file_obj.name.endswith('.csv'):
                 df = pd.read_csv(file_obj)
+                # Fix for headerless single-row files:
+                # If read as header-only (empty df) but has columns, treat as data row
+                if df.empty and len(df.columns) > 1:
+                    file_obj.seek(0)
+                    df = pd.read_csv(file_obj, header=None)
             elif file_obj.name.endswith('.xlsx'):
                 df = pd.read_excel(file_obj, engine='openpyxl')
             else:
@@ -173,23 +178,32 @@ class UploadView(APIView):
                 try:
                     # Convert to float then int to handle '400.0'
                     val = int(float(str(c)))
-                    if val > 0: # spectral data usually positive wavenumbers
-                        cols.append(val)
-                        valid_cols_map[val] = c
+                    if val >= 0: # spectral data usually positive wavenumbers (allow 0 for index-based)
+                        # Check if the data in this column is numeric
+                        # For headerless files, column names are just indices, so we must verify content
+                        val_in_row = df.iloc[0][c]
+                        try:
+                            float(val_in_row)
+                            cols.append(val)
+                            valid_cols_map[val] = c
+                        except:
+                            pass # Skip non-numeric column
                 except:
                     continue
             
             if len(cols) > 100:
-                 # Wide format (1 row = 1 sample)
-                 # Sort columns by wavenumber
-                 cols.sort()
-                 spectral_x = cols
-                 # Use the mapped original column names to fetch data
-                 original_cols = [valid_cols_map[c] for c in cols]
-                 # Take the first row
-                 spectral_y = df.iloc[0][original_cols].fillna(0).tolist()
+                # Wide format (1 row = 1 sample)
+                # Sort columns by wavenumber
+                cols.sort()
+                spectral_x = cols
+                # Use the mapped original column names to fetch data
+                original_cols = [valid_cols_map[c] for c in cols]
+                # Take the first row
+                # Ensure data is numeric (float)
+                row_series = df.iloc[0][original_cols]
+                spectral_y = pd.to_numeric(row_series, errors='coerce').fillna(0).tolist()
             else:
-                 # Long format (col1=x, col2=y)
+                # Long format (col1=x, col2=y)
                  if df.shape[1] >= 2:
                      # Assume first column is X, second is Y
                      # Need to ensure they are numeric
@@ -206,34 +220,39 @@ class UploadView(APIView):
         except Exception as e:
              return Response({"error": f"Data parsing error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Inference using MLEngine
-        diagnosis, confidence = MLEngine.predict(spectral_x, spectral_y)
+        # Inference and Save
+        try:
+            # Inference using MLEngine
+            diagnosis, confidence = MLEngine.predict(spectral_x, spectral_y)
 
-        # Create Patient
-        patient_id = request.data.get('patient_id')
-        if patient_id:
-            try:
-                patient = Patient.objects.get(id=patient_id)
-            except Patient.DoesNotExist:
-                 # Try finding by name/id logic if needed, or just create new
-                 patient = Patient.objects.create(name=f"Patient-{patient_id}", age=0, gender='F')
-        else:
-            patient = Patient.objects.create(name="Anonymous", age=50, gender='F')
+            # Create Patient
+            patient_id = request.data.get('patient_id')
+            if patient_id:
+                try:
+                    patient = Patient.objects.get(id=patient_id)
+                except Patient.DoesNotExist:
+                    # Try finding by name/id logic if needed, or just create new
+                    patient = Patient.objects.create(name=f"Patient-{patient_id}", age=0, gender='F')
+            else:
+                patient = Patient.objects.create(name="Anonymous", age=50, gender='F')
 
-        # Save Record
-        spectral_data = {'x': spectral_x, 'y': spectral_y}
-        
-        record = SpectrumRecord.objects.create(
-            patient=patient,
-            file_path=file_obj.name,
-            diagnosis_result=diagnosis,
-            confidence_score=confidence,
-            uploaded_by=request.user,
-            spectral_data=spectral_data
-        )
+            # Save Record
+            spectral_data = {'x': spectral_x, 'y': spectral_y}
+            
+            record = SpectrumRecord.objects.create(
+                patient=patient,
+                file_path=file_obj.name,
+                diagnosis_result=diagnosis,
+                confidence_score=confidence,
+                uploaded_by=request.user,
+                spectral_data=spectral_data
+            )
 
-        serializer = SpectrumRecordSerializer(record)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+            serializer = SpectrumRecordSerializer(record)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({"error": f"Processing error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 from django.db import transaction
 

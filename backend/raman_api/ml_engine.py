@@ -49,6 +49,39 @@ class MLEngine:
         if cls._current_model:
             # Reshape for sklearn (1, n_features)
             X = processed_y.reshape(1, -1)
+            
+            # Feature alignment Check
+            expected_features = cls._current_model.n_features_in_
+            if X.shape[1] != expected_features:
+                print(f"Feature mismatch: Model expects {expected_features}, got {X.shape[1]}. Resampling...")
+                try:
+                    from scipy import interpolate
+                    # Assume standard wavenumbers 400-2200 for model (length 1801)
+                    # Or generate indices if x is not consistent
+                    
+                    # Target wavenumbers (Model was trained on 400-2200 usually, or 0-1800 indices)
+                    # Since we don't know exact x used in training, we assume standard range if count matches 1801
+                    if expected_features == 1801:
+                         target_x = np.linspace(400, 2200, 1801)
+                    else:
+                         # Fallback: simple interpolation to match count
+                         target_x = np.linspace(spectral_data_x[0], spectral_data_x[-1], expected_features)
+                    
+                    # Current x
+                    if len(spectral_data_x) == len(processed_y):
+                        current_x = np.array(spectral_data_x)
+                    else:
+                        current_x = np.arange(len(processed_y))
+                        
+                    # Interpolate
+                    f = interpolate.interp1d(current_x, processed_y, kind='linear', fill_value="extrapolate")
+                    resampled_y = f(target_x)
+                    X = resampled_y.reshape(1, -1)
+                    
+                except Exception as e:
+                    print(f"Resampling failed: {e}")
+                    # Let it fail naturally in predict below or return error
+            
             # Assuming model predicts 0 (Benign) or 1 (Malignant)
             prob = cls._current_model.predict_proba(X)[0]
             prediction = cls._current_model.predict(X)[0]

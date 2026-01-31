@@ -150,7 +150,9 @@ const handleUpload = async (file) => {
   } catch (error) {
     // Error handled by interceptor or here
     if (!error.response || error.response.status !== 401) {
-       ElMessage.error("上传失败");
+       // Display specific error from backend if available
+       const errorMsg = error.response?.data?.error || "上传失败";
+       ElMessage.error(errorMsg);
     }
     console.error(error);
   } finally {
