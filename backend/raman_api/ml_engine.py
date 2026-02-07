@@ -11,7 +11,7 @@ import datetime
 
 from .models import ModelVersion, SpectrumRecord
 from .preprocessing import RamanPreprocessor
-from .models.cnn import MultiTaskRamanCNN
+from .cnn import MultiTaskRamanCNN
 from .utils.dataset import RamanDataset
 
 class MLEngine:
