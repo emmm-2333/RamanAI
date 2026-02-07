@@ -27,6 +27,36 @@ const isUploading = ref(false);
 // 诊断结果
 const diagnosisResult = ref(null);
 
+// 翻译映射
+const translateMarker = (marker) => {
+  const map = {
+    'ER': 'ER (雌激素受体)',
+    'PR': 'PR (孕激素受体)',
+    'HER2': 'HER2 (人表皮生长因子受体2)',
+    'Ki67': 'Ki67 (细胞增殖指数)'
+  };
+  return map[marker] || marker;
+};
+
+const translateStatus = (status) => {
+  const map = {
+    'Positive': '阳性',
+    'Negative': '阴性',
+    'High': '高表达',
+    'Low': '低表达'
+  };
+  return map[status] || status;
+};
+
+const translateDiagnosis = (diag) => {
+  const map = {
+    'Malignant': '恶性',
+    'Benign': '良性',
+    'Unknown': '未知'
+  };
+  return map[diag] || diag;
+};
+
 // 初始化图表
 const initChart = () => {
   if (!chartContainer.value) return;
@@ -189,7 +219,7 @@ const updateChartWithResult = (result) => {
 
   const option = {
     title: {
-      text: `诊断结果: ${result.diagnosis_result} (置信度: ${(result.confidence_score * 100).toFixed(2)}%)`,
+      text: `诊断结果: ${translateDiagnosis(result.diagnosis_result)} (置信度: ${(result.confidence_score * 100).toFixed(2)}%)`,
       textStyle: { color: color, fontWeight: "bold" },
     },
     xAxis: {
@@ -336,7 +366,7 @@ const updateChartWithResult = (result) => {
               >
               <span
                 class="text-lg font-medium text-gray-800 dark:text-gray-200"
-                >{{ diagnosisResult.diagnosis_result }}</span
+                >{{ translateDiagnosis(diagnosisResult.diagnosis_result) }}</span
               >
             </div>
             <div>
@@ -352,6 +382,37 @@ const updateChartWithResult = (result) => {
               >
             </div>
           </div>
+
+          <!-- Molecular Subtype Analysis -->
+          <div
+            v-if="diagnosisResult.metadata && diagnosisResult.metadata.predicted_markers"
+            class="mb-4 pt-4 border-t border-gray-200 dark:border-gray-600"
+          >
+            <div class="font-semibold text-gray-800 dark:text-gray-200 mb-3 text-sm">
+              分子分型预测
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div
+                v-for="(status, marker) in diagnosisResult.metadata.predicted_markers"
+                :key="marker"
+                class="flex justify-between items-center bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-600"
+              >
+                <span class="text-xs font-bold text-gray-600 dark:text-gray-400">{{ translateMarker(marker) }}</span>
+                <el-tag
+                  size="small"
+                  :type="
+                    status === 'Positive' || status === 'High'
+                      ? 'danger'
+                      : 'info'
+                  "
+                  effect="plain"
+                >
+                  {{ translateStatus(status) }}
+                </el-tag>
+              </div>
+            </div>
+          </div>
+
           <div v-if="diagnosisResult.diagnosis_result === 'Malignant'">
             <el-alert
               title="检测到异常，建议立即复核"

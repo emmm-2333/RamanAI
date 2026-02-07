@@ -85,7 +85,7 @@ class MLEngine:
         processed_y = RamanPreprocessor.process_pipeline(spectral_data_x, spectral_data_y)
         
         if not cls._current_model:
-             return "Unknown", 0.0
+             return "Unknown", 0.0, {}
 
         # 2. Inference
         if cls._model_type == 'torch':
@@ -113,7 +113,16 @@ class MLEngine:
                 
                 diagnosis = "Malignant" if prob_malignant > 0.5 else "Benign"
                 confidence = prob_malignant if diagnosis == "Malignant" else (1 - prob_malignant)
-                return diagnosis, confidence
+                
+                # Auxiliary predictions
+                predictions = {
+                    'ER': 'Positive' if torch.sigmoid(outputs['ER']).item() > 0.5 else 'Negative',
+                    'PR': 'Positive' if torch.sigmoid(outputs['PR']).item() > 0.5 else 'Negative',
+                    'HER2': 'Positive' if torch.sigmoid(outputs['HER2']).item() > 0.5 else 'Negative',
+                    'Ki67': 'High' if torch.sigmoid(outputs['Ki67']).item() > 0.5 else 'Low'
+                }
+                
+                return diagnosis, confidence, predictions
 
         else:
             # Sklearn Inference (Legacy)
@@ -133,10 +142,10 @@ class MLEngine:
                 prediction = cls._current_model.predict(X)[0]
                 diagnosis = "Malignant" if prediction == 1 else "Benign"
                 confidence = prob[prediction]
-                return diagnosis, confidence
+                return diagnosis, confidence, {}
             except Exception as e:
                 print(f"Inference error: {e}")
-                return "Error", 0.0
+                return "Error", 0.0, {}
 
     @classmethod
     def train_new_version(cls, version_name=None, description=""):

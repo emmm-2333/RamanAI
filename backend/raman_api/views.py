@@ -228,7 +228,13 @@ class UploadView(APIView):
         # Inference and Save
         try:
             # Inference using MLEngine
-            diagnosis, confidence = MLEngine.predict(spectral_x, spectral_y)
+            diagnosis, confidence, predictions = MLEngine.predict(spectral_x, spectral_y)
+            
+            # Save predictions to metadata
+            if 'metadata' not in locals():
+                metadata = {}
+            if predictions:
+                metadata['predicted_markers'] = predictions
 
             # Create Patient
             patient_id = request.data.get('patient_id')
@@ -314,8 +320,11 @@ class BatchImportView(APIView):
                                         y = df.iloc[:, 1].tolist()
                                         
                                         patient, _ = Patient.objects.get_or_create(name=sample_id, defaults={'age': 0, 'gender': 'F'})
-                                        diagnosis, confidence = MLEngine.predict(x, y)
+                                        diagnosis, confidence, predictions = MLEngine.predict(x, y)
                                         
+                                        # Metadata with predictions
+                                        meta = {'predicted_markers': predictions} if predictions else {}
+
                                         SpectrumRecord.objects.create(
                                             patient=patient,
                                             file_path=filename,
@@ -323,6 +332,7 @@ class BatchImportView(APIView):
                                             confidence_score=confidence,
                                             uploaded_by=request.user,
                                             spectral_data={'x': x, 'y': y},
+                                            metadata=meta,
                                             is_training_data=True
                                         )
                                         success_count += 1

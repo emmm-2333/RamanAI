@@ -14,6 +14,36 @@ const record = ref(null);
 const chartContainer = ref(null);
 let myChart = null;
 
+// 翻译映射
+const translateMarker = (marker) => {
+  const map = {
+    'ER': 'ER (雌激素受体)',
+    'PR': 'PR (孕激素受体)',
+    'HER2': 'HER2 (人表皮生长因子受体2)',
+    'Ki67': 'Ki67 (细胞增殖指数)'
+  };
+  return map[marker] || marker;
+};
+
+const translateStatus = (status) => {
+  const map = {
+    'Positive': '阳性',
+    'Negative': '阴性',
+    'High': '高表达',
+    'Low': '低表达'
+  };
+  return map[status] || status;
+};
+
+const translateDiagnosis = (diag) => {
+  const map = {
+    'Malignant': '恶性',
+    'Benign': '良性',
+    'Unknown': '未知'
+  };
+  return map[diag] || diag;
+};
+
 const preprocessConfig = ref({
   smooth: true,
   baseline: true,
@@ -172,10 +202,24 @@ watch(isDark, () => {
               :type="record.diagnosis_result === 'Malignant' ? 'danger' : 'success'"
               class="text-2xl px-6 py-2 h-auto mb-4"
             >
-              {{ record.diagnosis_result }}
+              {{ translateDiagnosis(record.diagnosis_result) }}
             </el-tag>
             <div class="text-gray-500">
               置信度: <span class="font-bold text-gray-800 dark:text-gray-200">{{ (record.confidence_score * 100).toFixed(2) }}%</span>
+            </div>
+          </div>
+          
+          <!-- Molecular Subtype Analysis -->
+          <div v-if="record.metadata && record.metadata.predicted_markers" class="border-t pt-4 mt-2">
+            <div class="font-bold mb-3 text-sm text-gray-700 dark:text-gray-300">分子分型预测</div>
+            <div class="grid grid-cols-2 gap-2">
+               <div v-for="(status, marker) in record.metadata.predicted_markers" :key="marker" 
+                    class="flex justify-between items-center bg-gray-50 dark:bg-gray-700/50 p-2 rounded">
+                  <span class="text-xs text-gray-500">{{ translateMarker(marker) }}</span>
+                  <el-tag size="small" :type="status === 'Positive' || status === 'High' ? 'danger' : 'info'" effect="light">
+                    {{ translateStatus(status) }}
+                  </el-tag>
+               </div>
             </div>
           </div>
         </el-card>
