@@ -1,22 +1,35 @@
 import os
 import joblib
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, random_split
 from django.conf import settings
+from pathlib import Path
+import datetime
+
 from .models import ModelVersion, SpectrumRecord
 from .preprocessing import RamanPreprocessor
+from .models.cnn import MultiTaskRamanCNN
+from .utils.dataset import RamanDataset
 
 class MLEngine:
     """
     机器学习引擎: 负责模型加载、推理和训练触发
+    Machine Learning Engine: Handles model loading, inference, and training
     """
     
     _current_model = None
+    _model_type = None # 'sklearn' or 'torch'
     _model_version = None
+    _model_config = {}
 
     @classmethod
     def load_active_model(cls):
         """
         加载当前激活的模型
+        Load the currently active model
         """
         try:
             active_model_record = ModelVersion.objects.filter(is_active=True).last()
@@ -25,12 +38,38 @@ class MLEngine:
                 return None
             
             model_path = active_model_record.file_path
-            if os.path.exists(model_path):
-                cls._current_model = joblib.load(model_path)
-                cls._model_version = active_model_record.version
-                print(f"Loaded model version: {cls._model_version}")
-            else:
+            if not os.path.exists(model_path):
                 print(f"Model file not found: {model_path}")
+                return
+
+            if model_path.endswith('.pth'):
+                # Load PyTorch Model
+                try:
+                    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+                    # Check if checkpoint is dict with config
+                    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                        state_dict = checkpoint['state_dict']
+                        cls._model_config = checkpoint.get('config', {})
+                    else:
+                        state_dict = checkpoint
+                        cls._model_config = {}
+                        
+                    input_len = cls._model_config.get('input_length', 1801)
+                    cls._current_model = MultiTaskRamanCNN(input_length=input_len)
+                    cls._current_model.load_state_dict(state_dict)
+                    cls._current_model.eval()
+                    cls._model_type = 'torch'
+                except Exception as e:
+                    print(f"Error loading torch model: {e}")
+                    return
+            else:
+                # Load Sklearn Model (Legacy)
+                cls._current_model = joblib.load(model_path)
+                cls._model_type = 'sklearn'
+
+            cls._model_version = active_model_record.version
+            print(f"Loaded model version: {cls._model_version} ({cls._model_type})")
+
         except Exception as e:
             print(f"Error loading model: {e}")
 
@@ -45,78 +84,76 @@ class MLEngine:
         # 1. Preprocessing
         processed_y = RamanPreprocessor.process_pipeline(spectral_data_x, spectral_data_y)
         
+        if not cls._current_model:
+             return "Unknown", 0.0
+
         # 2. Inference
-        if cls._current_model:
-            # Reshape for sklearn (1, n_features)
-            X = processed_y.reshape(1, -1)
+        if cls._model_type == 'torch':
+            # PyTorch Inference
+            # Interpolate to 1801 if needed
+            target_len = 1801
+            if len(processed_y) != target_len:
+                 # Simple interpolation
+                 from scipy import interpolate
+                 current_x = np.linspace(0, 1, len(processed_y))
+                 target_x = np.linspace(0, 1, target_len)
+                 f = interpolate.interp1d(current_x, processed_y, kind='linear', fill_value="extrapolate")
+                 processed_y = f(target_x)
+
+            tensor_x = torch.tensor(processed_y, dtype=torch.float32).view(1, 1, -1) # (1, 1, L)
             
-            # Feature alignment Check
-            expected_features = cls._current_model.n_features_in_
-            if X.shape[1] != expected_features:
-                print(f"Feature mismatch: Model expects {expected_features}, got {X.shape[1]}. Resampling...")
-                try:
-                    from scipy import interpolate
-                    # Assume standard wavenumbers 400-2200 for model (length 1801)
-                    # Or generate indices if x is not consistent
-                    
-                    # Target wavenumbers (Model was trained on 400-2200 usually, or 0-1800 indices)
-                    # Since we don't know exact x used in training, we assume standard range if count matches 1801
-                    if expected_features == 1801:
-                         target_x = np.linspace(400, 2200, 1801)
-                    else:
-                         # Fallback: simple interpolation to match count
-                         target_x = np.linspace(spectral_data_x[0], spectral_data_x[-1], expected_features)
-                    
-                    # Current x
-                    if len(spectral_data_x) == len(processed_y):
-                        current_x = np.array(spectral_data_x)
-                    else:
-                        current_x = np.arange(len(processed_y))
-                        
-                    # Interpolate
-                    f = interpolate.interp1d(current_x, processed_y, kind='linear', fill_value="extrapolate")
-                    resampled_y = f(target_x)
-                    X = resampled_y.reshape(1, -1)
-                    
-                except Exception as e:
-                    print(f"Resampling failed: {e}")
-                    # Let it fail naturally in predict below or return error
-            
-            # Assuming model predicts 0 (Benign) or 1 (Malignant)
-            prob = cls._current_model.predict_proba(X)[0]
-            prediction = cls._current_model.predict(X)[0]
-            
-            diagnosis = "Malignant" if prediction == 1 else "Benign"
-            confidence = prob[prediction]
-            return diagnosis, confidence
+            with torch.no_grad():
+                outputs = cls._current_model(tensor_x)
+                # Main diagnosis
+                logits_diag = outputs['diagnosis']
+                prob_malignant = torch.sigmoid(logits_diag).item()
+                
+                # We can also log or use aux outputs here if needed
+                # e.g., print(f"ER Prob: {torch.sigmoid(outputs['ER']).item()}")
+                
+                diagnosis = "Malignant" if prob_malignant > 0.5 else "Benign"
+                confidence = prob_malignant if diagnosis == "Malignant" else (1 - prob_malignant)
+                return diagnosis, confidence
+
         else:
-            # Fallback / Dummy Logic for now
-            # E.g. simple rule: high intensity at specific peak?
-            # Random for demo if no model
-            return "Unknown", 0.0
+            # Sklearn Inference (Legacy)
+            X = processed_y.reshape(1, -1)
+            # ... (Reuse existing resampling logic if strictly needed, but assuming data is consistent)
+            try:
+                if hasattr(cls._current_model, 'n_features_in_'):
+                    if X.shape[1] != cls._current_model.n_features_in_:
+                         # Resample logic (simplified)
+                         from scipy import interpolate
+                         current_x = np.linspace(0, 1, X.shape[1])
+                         target_x = np.linspace(0, 1, cls._current_model.n_features_in_)
+                         f = interpolate.interp1d(current_x, processed_y, kind='linear', fill_value="extrapolate")
+                         X = f(target_x).reshape(1, -1)
+                
+                prob = cls._current_model.predict_proba(X)[0]
+                prediction = cls._current_model.predict(X)[0]
+                diagnosis = "Malignant" if prediction == 1 else "Benign"
+                confidence = prob[prediction]
+                return diagnosis, confidence
+            except Exception as e:
+                print(f"Inference error: {e}")
+                return "Error", 0.0
 
     @classmethod
     def train_new_version(cls, version_name=None, description=""):
         """
-        触发新模型训练
+        触发新模型训练 (CNN Multi-Task)
+        Trigger new model training
         """
-        from .models import SpectrumRecord, ModelVersion
-        from sklearn.ensemble import RandomForestClassifier
-        from sklearn.model_selection import train_test_split
-        from sklearn.metrics import accuracy_score, classification_report
-        import joblib
-        from pathlib import Path
-        import datetime
-
-        print("Starting training pipeline...")
+        print("Starting CNN training pipeline...")
         
         # 1. Fetch data
         records = SpectrumRecord.objects.filter(is_training_data=True)
         if not records.exists():
             return {"status": "error", "message": "No training data found"}
 
-        X = []
-        y = []
+        X_data = []
+        y_data = []
+        metadata_list = []
         
         for record in records:
             if not record.spectral_data or 'y' not in record.spectral_data:
@@ -127,48 +164,113 @@ class MLEngine:
             wavenumbers = record.spectral_data.get('x', [])
             processed_y = RamanPreprocessor.process_pipeline(wavenumbers, raw_y)
             
-            X.append(processed_y)
-            label = 1 if record.diagnosis_result == 'Malignant' else 0
-            y.append(label)
+            # Ensure fixed length 1801
+            if len(processed_y) != 1801:
+                 from scipy import interpolate
+                 current_x = np.linspace(0, 1, len(processed_y))
+                 target_x = np.linspace(0, 1, 1801)
+                 f = interpolate.interp1d(current_x, processed_y, kind='linear', fill_value="extrapolate")
+                 processed_y = f(target_x)
 
-        X = np.array(X)
-        y = np.array(y)
+            X_data.append(processed_y)
+            label = 1.0 if record.diagnosis_result == 'Malignant' else 0.0
+            y_data.append(label)
+            metadata_list.append(record.metadata or {})
+
+        # 2. Dataset & DataLoader
+        dataset = RamanDataset(X_data, y_data, metadata_list)
+        train_size = int(0.8 * len(dataset))
+        test_size = len(dataset) - train_size
+        train_ds, test_ds = random_split(dataset, [train_size, test_size])
         
-        # 2. Train
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        clf = RandomForestClassifier(n_estimators=100, random_state=42)
-        clf.fit(X_train, y_train)
+        train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+        test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)
         
-        # 3. Evaluate
-        y_pred = clf.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        report = classification_report(y_test, y_pred, output_dict=True)
+        # 3. Model Setup
+        model = MultiTaskRamanCNN(input_length=1801)
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
         
-        # 4. Save
+        # 4. Training Loop
+        epochs = 10 # Keep it small for demo/fast feedback, usually 50+
+        model.train()
+        
+        def masked_loss(pred, target):
+            # Target shape: (Batch, 1)
+            # Mask: 1 where target != -1, else 0
+            mask = (target != -1.0).float()
+            # BCEWithLogitsLoss (per element)
+            criterion = nn.BCEWithLogitsLoss(reduction='none')
+            loss = criterion(pred, target)
+            loss = loss * mask
+            # Avoid division by zero
+            return loss.sum() / (mask.sum() + 1e-6)
+
+        for epoch in range(epochs):
+            total_loss = 0
+            for X_batch, y_batch, aux_batch in train_loader:
+                optimizer.zero_grad()
+                outputs = model(X_batch)
+                
+                # Main Task Loss
+                l_diag = nn.BCEWithLogitsLoss()(outputs['diagnosis'], y_batch.unsqueeze(1))
+                
+                # Aux Task Losses (ER, PR, HER2, Ki67)
+                # aux_batch shape: (Batch, 4) -> [ER, PR, HER2, Ki67]
+                l_er = masked_loss(outputs['ER'], aux_batch[:, 0:1])
+                l_pr = masked_loss(outputs['PR'], aux_batch[:, 1:2])
+                l_her2 = masked_loss(outputs['HER2'], aux_batch[:, 2:3])
+                l_ki67 = masked_loss(outputs['Ki67'], aux_batch[:, 3:4])
+                
+                loss = l_diag + 0.2 * (l_er + l_pr + l_her2 + l_ki67)
+                
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss/len(train_loader):.4f}")
+
+        # 5. Evaluate (Simple Accuracy on Main Task)
+        model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for X_batch, y_batch, _ in test_loader:
+                outputs = model(X_batch)
+                preds = torch.sigmoid(outputs['diagnosis']) > 0.5
+                correct += (preds.float() == y_batch.unsqueeze(1)).sum().item()
+                total += y_batch.size(0)
+        
+        acc = correct / total if total > 0 else 0.0
+        
+        # 6. Save
         if not version_name:
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
-            version_name = f"v{timestamp}"
+            version_name = f"v{timestamp}_cnn"
             
         models_dir = Path(settings.BASE_DIR) / "models_storage"
         models_dir.mkdir(exist_ok=True)
-        model_path = models_dir / f"rf_{version_name}.pkl"
+        model_path = models_dir / f"{version_name}.pth"
         
-        joblib.dump(clf, model_path)
+        save_dict = {
+            'state_dict': model.state_dict(),
+            'config': {'input_length': 1801}
+        }
+        torch.save(save_dict, model_path)
         
-        # 5. Register
+        # 7. Register
         ModelVersion.objects.create(
             version=version_name,
             file_path=str(model_path),
             accuracy=acc,
-            metrics=report,
-            is_active=True, # Auto activate
-            description=description or "Auto-trained model"
+            metrics={'accuracy': acc},
+            is_active=True,
+            description=description or "Multi-Task CNN Model"
         )
         
         # Deactivate others
         ModelVersion.objects.exclude(version=version_name).update(is_active=False)
         
-        # Reload current model
+        # Reload
         cls.load_active_model()
         
         return {"status": "success", "version": version_name, "accuracy": acc}
