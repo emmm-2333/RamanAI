@@ -42,6 +42,14 @@ Thumbs.db
 # Data exports
 data/csv/
 
+# 原始数据集（含患者信息，不应纳入版本控制）
+data/*.xlsx
+data/*.csv
+
+# 模型文件（二进制大文件，应通过对象存储管理）
+backend/models_storage/*.pkl
+backend/models_storage/*.pth
+
 # Tests and coverage
 .coverage
 htmlcov/

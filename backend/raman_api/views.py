@@ -1,16 +1,20 @@
+import logging
+
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth.models import User
-from .serializers import UserSerializer, SpectrumRecordSerializer, SpectrumRecordDetailSerializer, ModelVersionSerializer, DiagnosisFeedbackSerializer
+from .serializers import UserSerializer, SpectrumRecordSerializer, SpectrumRecordDetailSerializer, ModelVersionSerializer, DiagnosisFeedbackSerializer, PreprocessConfigSerializer
 from .models import SpectrumRecord, Patient, ModelVersion, DiagnosisFeedback
 from .ml_engine import MLEngine
 from .preprocessing import RamanPreprocessor
 from .device_driver import MockSpectrometer
 import pandas as pd
 import random
+
+logger = logging.getLogger(__name__)
 
 # Initialize ML Engine
 MLEngine.load_active_model()
@@ -99,11 +103,13 @@ class SpectrumRecordViewSet(viewsets.ModelViewSet):
         record = self.get_object()
         if not record.spectral_data or 'y' not in record.spectral_data:
             return Response({'error': 'No spectral data found'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        config = request.data.get('config', {})
-        # Default config if not provided
-        # config example: {'smooth': True, 'baseline': True, 'normalize': True, 'baseline_method': 'poly', 'derivative': 0}
-        
+
+        # 校验预处理配置参数（P2-15）
+        config_serializer = PreprocessConfigSerializer(data=request.data.get('config', {}))
+        if not config_serializer.is_valid():
+            return Response({'error': config_serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        config = config_serializer.validated_data
+
         wavenumbers = record.spectral_data.get('x', [])
         raw_y = record.spectral_data['y']
         
@@ -112,13 +118,14 @@ class SpectrumRecordViewSet(viewsets.ModelViewSet):
             # Ensure JSON serializable (numpy array to list)
             if hasattr(processed_y, 'tolist'):
                 processed_y = processed_y.tolist()
-                
+
             return Response({
                 'x': wavenumbers,
                 'y': processed_y
             })
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception:
+            logger.exception("Preprocessing failed for record id=%s", pk)
+            return Response({'error': '预处理失败，请检查参数配置'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UploadView(APIView):
     """
@@ -157,6 +164,7 @@ class UploadView(APIView):
                     # But better to rely on extension. Let's just return error if not matched above or generic read failed.
                     return Response({"error": "Unsupported file format. Please upload .csv, .xlsx, or .txt"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            logger.exception("Failed to read uploaded file: %s", file_obj.name)
             return Response({"error": f"Failed to read file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Assume file format: columns are wavenumbers, first row is intensities
@@ -272,8 +280,9 @@ class UploadView(APIView):
             serializer = SpectrumRecordDetailSerializer(record)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
             
-        except Exception as e:
-            return Response({"error": f"Processing error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception:
+            logger.exception("Inference/save failed for file: %s", file_obj.name)
+            return Response({"error": "处理失败，请联系管理员"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 from django.db import transaction
 
@@ -509,25 +518,34 @@ class DeviceView(APIView):
 class ModelManageView(generics.ListCreateAPIView):
     """
     模型版本管理接口
+    POST { "action": "train" } 异步触发训练，立即返回，不阻塞请求
     """
     queryset = ModelVersion.objects.all().order_by('-created_at')
     serializer_class = ModelVersionSerializer
-    permission_classes = (permissions.IsAuthenticated,) # Should be Admin only
+    permission_classes = (permissions.IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
-        # Custom logic to trigger training
         action = request.data.get('action')
         if action == 'train':
-            # Trigger async task (celery recommended, but sync for now)
-            try:
-                result = MLEngine.train_new_version(
-                    description=request.data.get('description', 'Manual trigger')
-                )
-                return Response(result)
-            except Exception as e:
-                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                
+            result = MLEngine.start_training_async(
+                description=request.data.get('description', 'Manual trigger')
+            )
+            http_status = (
+                status.HTTP_202_ACCEPTED
+                if result.get('status') == 'queued'
+                else status.HTTP_409_CONFLICT
+            )
+            return Response(result, status=http_status)
+
         return super().post(request, *args, **kwargs)
+
+
+class TrainingStatusView(APIView):
+    """查询当前异步训练进度"""
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        return Response(MLEngine.get_training_status())
 
 class FeedbackView(generics.CreateAPIView):
     """

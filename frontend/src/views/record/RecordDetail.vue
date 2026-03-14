@@ -5,6 +5,7 @@ import spectrumApi from '../../api/spectrum';
 import * as echarts from 'echarts';
 import { useDark } from '@vueuse/core';
 import { ArrowLeft } from '@element-plus/icons-vue';
+import { useTranslations } from '../../composables/useTranslations';
 
 const route = useRoute();
 const router = useRouter();
@@ -14,35 +15,7 @@ const record = ref(null);
 const chartContainer = ref(null);
 let myChart = null;
 
-// 翻译映射
-const translateMarker = (marker) => {
-  const map = {
-    'ER': 'ER (雌激素受体)',
-    'PR': 'PR (孕激素受体)',
-    'HER2': 'HER2 (人表皮生长因子受体2)',
-    'Ki67': 'Ki67 (细胞增殖指数)'
-  };
-  return map[marker] || marker;
-};
-
-const translateStatus = (status) => {
-  const map = {
-    'Positive': '阳性',
-    'Negative': '阴性',
-    'High': '高表达',
-    'Low': '低表达'
-  };
-  return map[status] || status;
-};
-
-const translateDiagnosis = (diag) => {
-  const map = {
-    'Malignant': '恶性',
-    'Benign': '良性',
-    'Unknown': '未知'
-  };
-  return map[diag] || diag;
-};
+const { translateMarker, translateStatus, translateDiagnosis } = useTranslations();
 
 const preprocessConfig = ref({
   smooth: true,

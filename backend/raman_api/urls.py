@@ -1,5 +1,5 @@
 from django.urls import path, include
-from .views import RegisterView, UploadView, MeView, DeviceView, ModelManageView, FeedbackView, SpectrumRecordViewSet, BatchImportView
+from .views import RegisterView, UploadView, MeView, DeviceView, ModelManageView, TrainingStatusView, FeedbackView, SpectrumRecordViewSet, BatchImportView
 from .analysis_views import PCAAnalysisView, ClusteringAnalysisView
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
@@ -19,6 +19,7 @@ urlpatterns = [
     path('upload/batch/', BatchImportView.as_view(), name='batch_import'),
     path('device/', DeviceView.as_view(), name='device_control'),
     path('models/', ModelManageView.as_view(), name='model_manage'),
+    path('models/train_status/', TrainingStatusView.as_view(), name='train_status'),
     path('feedback/', FeedbackView.as_view(), name='diagnosis_feedback'),
     path('analysis/pca/', PCAAnalysisView.as_view(), name='analysis_pca'),
     path('analysis/cluster/', ClusteringAnalysisView.as_view(), name='analysis_cluster'),

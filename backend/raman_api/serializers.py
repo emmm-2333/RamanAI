@@ -2,6 +2,49 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import UserProfile, Patient, SpectrumRecord, ModelVersion, DiagnosisFeedback
 
+
+class SpectralDataSerializer(serializers.Serializer):
+    """
+    光谱数据输入校验器。
+    用于接收 x/y 数组时，确保格式和长度合法。
+    """
+    x = serializers.ListField(
+        child=serializers.FloatField(),
+        min_length=100,
+        max_length=5000,
+        help_text="波数数组，100~5000 个点"
+    )
+    y = serializers.ListField(
+        child=serializers.FloatField(),
+        min_length=100,
+        max_length=5000,
+        help_text="强度数组，长度须与 x 一致"
+    )
+
+    def validate(self, data):
+        if len(data['x']) != len(data['y']):
+            raise serializers.ValidationError("x 和 y 数组长度必须一致")
+        return data
+
+
+class PreprocessConfigSerializer(serializers.Serializer):
+    """
+    预处理参数校验器，用于 /records/{id}/preprocess/ 接口。
+    """
+    smooth          = serializers.BooleanField(required=False, default=True)
+    baseline        = serializers.BooleanField(required=False, default=True)
+    baseline_method = serializers.ChoiceField(
+        choices=['poly', 'als'], required=False, default='poly'
+    )
+    normalize        = serializers.BooleanField(required=False, default=True)
+    normalize_method = serializers.ChoiceField(
+        choices=['minmax', 'snv'], required=False, default='minmax'
+    )
+    derivative = serializers.ChoiceField(
+        choices=[0, 1, 2], required=False, default=0
+    )
+
+
 class UserSerializer(serializers.ModelSerializer):
     """
     用户序列化器，用于注册和显示用户信息。

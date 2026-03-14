@@ -7,7 +7,9 @@
 
 ## P0 — 安全漏洞（必须修复，否则不应上线）
 
-### 1. 数据库密码与 SECRET_KEY 硬编码在源码中
+### ✅ 1. 数据库密码与 SECRET_KEY 硬编码在源码中
+
+> **已完成** (2026-03-14)：`settings.py` 中 `DATABASES` 配置已改为通过 `django-environ` 读取 `.env` 文件中的 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME`，不再硬编码任何敏感信息。
 
 **位置**: `backend/raman_backend/settings.py`
 
@@ -40,7 +42,9 @@ DATABASES = {'default': env.db()}   # DATABASE_URL=mysql://user:pass@host/db
 
 ---
 
-### 2. JWT Refresh Token 有效期异常短
+### ✅ 2. JWT Refresh Token 有效期异常短
+
+> **已完成** (2026-03-14)：`REFRESH_TOKEN_LIFETIME` 由 1 天延长至 7 天，`ACCESS_TOKEN_LIFETIME` 由 60 分钟缩短至 30 分钟（更安全）。
 
 **位置**: `backend/raman_backend/settings.py`
 
@@ -59,7 +63,9 @@ SIMPLE_JWT = {
 
 ## P1 — 核心功能与稳定性问题
 
-### 3. 模型训练阻塞 HTTP 请求（最高优先级功能问题）
+### ✅ 3. 模型训练阻塞 HTTP 请求（最高优先级功能问题）
+
+> **已完成** (2026-03-14)：新增 `MLEngine.start_training_async()` 方法，使用 `threading.Thread` 在后台线程执行训练。API 立即返回 `202 Accepted`。新增 `GET /api/v1/models/train_status/` 接口供前端轮询训练进度。
 
 **位置**: `backend/raman_api/views.py` → 触发训练的端点
 **位置**: `backend/raman_api/ml_engine.py` → `train_new_version()`
@@ -90,7 +96,9 @@ return Response({'task_id': result.id, 'status': 'queued'})
 
 ---
 
-### 4. 训练轮数严重不足，缺少必要的训练策略
+### ✅ 4. 训练轮数严重不足，缺少必要的训练策略
+
+> **已完成** (2026-03-14)：`max_epochs` 提升至 100，加入 `ReduceLROnPlateau` 学习率调度（patience=10, factor=0.5），加入早停机制（patience=15），保存验证集上最优 checkpoint 而非最后一轮。
 
 **位置**: `backend/raman_api/ml_engine.py`
 
@@ -117,7 +125,9 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
 
 ---
 
-### 5. 医疗场景下的评估指标严重不足
+### ✅ 5. 医疗场景下的评估指标严重不足
+
+> **已完成** (2026-03-14)：新增 `_compute_medical_metrics()` 函数，训练后自动计算并写入 `ModelVersion.metrics`：Accuracy、Sensitivity、Specificity、PPV、NPV、F1-Score、AUC-ROC 及混淆矩阵（TP/TN/FP/FN）。
 
 **位置**: `backend/raman_api/ml_engine.py` → 训练结束后的评估段
 
@@ -148,7 +158,9 @@ metrics = {
 
 ---
 
-### 6. 类别不平衡问题未处理
+### ✅ 6. 类别不平衡问题未处理
+
+> **已完成** (2026-03-14)：训练前统计良恶性分布并输出到日志；自动计算 `pos_weight = n_benign / n_malignant` 并传入 `BCEWithLogitsLoss`，消除类别偏置。
 
 **位置**: `backend/raman_api/ml_engine.py`
 
@@ -189,7 +201,9 @@ tests/
 
 ---
 
-### 8. 预处理参数无版本化，存在训练/推理漂移风险
+### ✅ 8. 预处理参数无版本化，存在训练/推理漂移风险
+
+> **已完成** (2026-03-14)：定义 `DEFAULT_PREPROCESSING_CONFIG` 常量，训练时将预处理参数序列化进 checkpoint（`preprocessing` 键），推理时优先从 checkpoint 还原配置，确保训练与推理的预处理参数完全一致。
 
 **位置**: `backend/raman_api/preprocessing.py` + `ml_engine.py`
 
@@ -222,7 +236,9 @@ preprocessor = RamanPreprocessor(**checkpoint['config']['preprocessing'])
 
 ## P2 — 代码质量与长期可维护性
 
-### 9. 前端翻译函数重复定义
+### ✅ 9. 前端翻译函数重复定义
+
+> **已完成** (2026-03-14)：创建 `frontend/src/composables/useTranslations.js`，统一管理 `translateMarker / translateStatus / translateDiagnosis`。`Dashboard.vue` 和 `RecordDetail.vue` 均改为导入复用，删除原有重复定义。
 
 **位置**: `frontend/src/views/Dashboard.vue` 和 `frontend/src/views/record/RecordDetail.vue`
 
@@ -262,7 +278,13 @@ const { translateMarker, translateStatus } = useTranslations();
 
 ---
 
-### 10. 大型视图文件缺乏组件拆分
+### ✅ 10. 大型视图文件缺乏组件拆分
+
+> **已完成** (2026-03-14)：从 `Dashboard.vue`（原438行）中抽取两个子组件：
+> - `components/spectrum/SpectrumChart.vue`：封装 ECharts 初始化、主题监听、数据响应逻辑
+> - `components/spectrum/DiagnosisResultCard.vue`：封装诊断结果展示、分子分型表格逻辑
+>
+> `Dashboard.vue` 精简至约 70 行，职责单一清晰。
 
 **位置**: `frontend/src/views/Dashboard.vue`（约 438 行）和 `views.py`（约 540 行）
 
@@ -282,7 +304,9 @@ components/
 
 ---
 
-### 11. `views.py` 中部分裸露异常处理
+### ✅ 11. `views.py` 中部分裸露异常处理
+
+> **已完成** (2026-03-14)：在文件顶部引入 `logging.getLogger(__name__)`，所有 `except Exception` 块改用 `logger.exception(...)` 记录完整堆栈。推理失败、文件解析失败等场景均返回对用户友好的错误提示，不再透出内部错误详情。
 
 **位置**: `backend/raman_api/views.py`
 
@@ -305,7 +329,9 @@ except Exception as e:
 
 ---
 
-### 12. 旧版 RandomForest 模型文件残留
+### ✅ 12. 旧版 RandomForest 模型文件残留
+
+> **已完成** (2026-03-14)：通过 `git rm --cached` 从 Git 跟踪中移除三个旧版 `.pkl` 文件（`rf_v1.0.0`、`rf_v202601291557`、`rf_v202601311947`），并在 `.gitignore` 中添加 `backend/models_storage/*.pkl` 规则，防止再次被误提交。
 
 **位置**: `backend/models_storage/`
 
@@ -318,7 +344,9 @@ except Exception as e:
 
 ---
 
-### 13. 数据原始文件不应纳入 Git 管理
+### ✅ 13. 数据原始文件不应纳入 Git 管理
+
+> **已完成** (2026-03-14)：通过 `git rm --cached` 移除 `data/data.xlsx` 和 `data/data_full.csv` 的 Git 跟踪，`.gitignore` 中新增 `data/*.xlsx` 和 `data/*.csv` 规则。
 
 **位置**: `data/data.xlsx`（21.5MB）、`data/data_full.csv`（21.5MB）、`data/csv/`（约 1371 个文件）
 
@@ -335,7 +363,9 @@ except Exception as e:
 
 ---
 
-### 14. CNN 模型文件（`.pth`）不应纳入 Git 管理
+### ✅ 14. CNN 模型文件（`.pth`）不应纳入 Git 管理
+
+> **已完成** (2026-03-14)：通过 `git rm --cached` 移除 `v202602072317_cnn.pth` 的 Git 跟踪，`.gitignore` 中新增 `backend/models_storage/*.pth` 规则。
 
 **位置**: `backend/models_storage/v202602072317_cnn.pth`（58KB，未来会增大）
 
@@ -348,7 +378,13 @@ except Exception as e:
 
 ---
 
-### 15. 缺少 API 参数校验与输入约束
+### ✅ 15. 缺少 API 参数校验与输入约束
+
+> **已完成** (2026-03-14)：在 `serializers.py` 中新增：
+> - `SpectralDataSerializer`：校验 x/y 数组长度（100~5000 个点）、类型（float）和一致性
+> - `PreprocessConfigSerializer`：校验 baseline_method、normalize_method、derivative 等枚举值
+>
+> 在 `preprocess` 端点中使用 `PreprocessConfigSerializer` 进行入参校验，非法参数返回 400。
 
 **位置**: `backend/raman_api/serializers.py` 和 `views.py`
 
@@ -372,40 +408,25 @@ class SpectrumDataSerializer(serializers.Serializer):
 
 ## 汇总优先级表
 
-| #   | 问题                   | 优先级 | 复杂度 | 影响范围   |
-| --- | ---------------------- | ------ | ------ | ---------- |
-| 1   | 密码/SECRET_KEY 硬编码 | P0     | 低     | 安全       |
-| 2   | JWT 有效期配置         | P0     | 低     | 安全/体验  |
-| 3   | 训练阻塞请求线程       | P1     | 高     | 稳定性     |
-| 4   | 训练轮数/策略不足      | P1     | 中     | 模型质量   |
-| 5   | 医疗评估指标缺失       | P1     | 中     | 模型可信度 |
-| 6   | 类别不平衡未处理       | P1     | 低     | 模型质量   |
-| 7   | 测试覆盖缺失           | P1     | 高     | 维护性     |
-| 8   | 预处理无版本化         | P1     | 中     | 模型一致性 |
-| 9   | 前端翻译函数重复       | P2     | 低     | 可维护性   |
-| 10  | 大型文件未拆分         | P2     | 中     | 可维护性   |
-| 11  | 裸露异常处理           | P2     | 低     | 可观测性   |
-| 12  | 旧模型文件残留         | P2     | 低     | 整洁度     |
-| 13  | 数据文件纳入 Git       | P2     | 低     | 合规/性能  |
-| 14  | 模型文件纳入 Git       | P2     | 低     | 合规/性能  |
-| 15  | API 输入校验不足       | P2     | 中     | 健壮性     |
+| #  | 问题                   | 优先级 | 复杂度 | 影响范围   | 状态 |
+|----|------------------------|--------|--------|------------|------|
+| 1  | 密码/SECRET_KEY 硬编码 | P0     | 低     | 安全       | ✅ 已完成 |
+| 2  | JWT 有效期配置         | P0     | 低     | 安全/体验  | ✅ 已完成 |
+| 3  | 训练阻塞请求线程       | P1     | 高     | 稳定性     | ✅ 已完成 |
+| 4  | 训练轮数/策略不足      | P1     | 中     | 模型质量   | ✅ 已完成 |
+| 5  | 医疗评估指标缺失       | P1     | 中     | 模型可信度 | ✅ 已完成 |
+| 6  | 类别不平衡未处理       | P1     | 低     | 模型质量   | ✅ 已完成 |
+| 7  | 测试覆盖缺失           | P1     | 高     | 维护性     | ⏭ 跳过 |
+| 8  | 预处理无版本化         | P1     | 中     | 模型一致性 | ✅ 已完成 |
+| 9  | 前端翻译函数重复       | P2     | 低     | 可维护性   | ✅ 已完成 |
+| 10 | 大型文件未拆分         | P2     | 中     | 可维护性   | ✅ 已完成 |
+| 11 | 裸露异常处理           | P2     | 低     | 可观测性   | ✅ 已完成 |
+| 12 | 旧模型文件残留         | P2     | 低     | 整洁度     | ✅ 已完成 |
+| 13 | 数据文件纳入 Git       | P2     | 低     | 合规/性能  | ✅ 已完成 |
+| 14 | 模型文件纳入 Git       | P2     | 低     | 合规/性能  | ✅ 已完成 |
+| 15 | API 输入校验不足       | P2     | 中     | 健壮性     | ✅ 已完成 |
 
 ---
 
-_文档生成时间: 2026-03-14_
-_基于代码库 commit: 5ba546f_ | 模型可信度 |
-| 6 | 类别不平衡未处理 | P1 | 低 | 模型质量 |
-| 7 | 测试覆盖缺失 | P1 | 高 | 维护性 |
-| 8 | 预处理无版本化 | P1 | 中 | 模型一致性 |
-| 9 | 前端翻译函数重复 | P2 | 低 | 可维护性 |
-| 10 | 大型文件未拆分 | P2 | 中 | 可维护性 |
-| 11 | 裸露异常处理 | P2 | 低 | 可观测性 |
-| 12 | 旧模型文件残留 | P2 | 低 | 整洁度 |
-| 13 | 数据文件纳入 Git | P2 | 低 | 合规/性能 |
-| 14 | 模型文件纳入 Git | P2 | 低 | 合规/性能 |
-| 15 | API 输入校验不足 | P2 | 中 | 健壮性 |
-
----
-
-*文档生成时间: 2026-03-14*
-*基于代码库 commit: 5ba546f*
+_文档生成时间: 2026-03-14 | 基于代码库 commit: 5ba546f_
+_改进实施时间: 2026-03-14（共完成 14/15 项，跳过测试覆盖）_
